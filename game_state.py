@@ -1,5 +1,6 @@
 from deck import Deck
 from hand import Hand
+from card import Unit
 
 
 class GameState:
@@ -67,3 +68,15 @@ class GameState:
     def is_boss_dead(self) -> bool:
         """Returns True if the boss has no health remaining."""
         return self.boss_health <= 0
+
+    def play_card_to_board(self, card: Unit) -> bool:
+        """Attempts to play a unit card from hand to the player board.
+        Returns True if successful, False if board is full or insufficient mana."""
+        if len(self.player_board) >= self.MAXIMUM_BOARD_SIZE:
+            return False
+        if not self.can_afford(card.mana_cost):
+            return False
+        self.spend_mana(card.mana_cost)
+        self.player_hand.remove_card(card)
+        self.player_board.append(card)
+        return True

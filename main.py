@@ -32,12 +32,27 @@ COLOUR_TEXT_DEFAULT = (255, 255, 255)
 COLOUR_STAT_ATTACK = (255, 200, 50)
 COLOUR_STAT_HEALTH = (220, 80, 80)
 COLOUR_STAT_MANA = (100, 150, 255)
+COLOUR_CARD_SELECTED = (255, 255, 100)
+COLOUR_CARD_UNAFFORDABLE = (120, 60, 60)
 
 
-def draw_unit_card(surface: pygame.Surface, unit: Unit, x: int, y: int):
-    """Draws a placeholder unit card at the given position."""
-    pygame.draw.rect(surface, (60, 60, 80), (x, y, CARD_WIDTH, CARD_HEIGHT), border_radius=8)
-    pygame.draw.rect(surface, (200, 200, 220), (x, y, CARD_WIDTH, CARD_HEIGHT), width=2, border_radius=8)
+def draw_unit_card(surface: pygame.Surface, unit: Unit, x: int, y: int, is_selected: bool = False,
+                   is_affordable: bool = True):
+    """Draws a unit card at the given position with optional selection and affordability highlights."""
+    background_colour = (60, 60, 80)
+    if is_selected:
+        border_colour = COLOUR_CARD_SELECTED
+        border_width = 3
+    elif not is_affordable:
+        background_colour = (45, 35, 45)
+        border_colour = COLOUR_CARD_UNAFFORDABLE
+        border_width = 2
+    else:
+        border_colour = (200, 200, 220)
+        border_width = 2
+
+    pygame.draw.rect(surface, background_colour, (x, y, CARD_WIDTH, CARD_HEIGHT), border_radius=8)
+    pygame.draw.rect(surface, border_colour, (x, y, CARD_WIDTH, CARD_HEIGHT), width=border_width, border_radius=8)
 
     font_name_text = pygame.font.SysFont(None, 19)
     font_stats_text = pygame.font.SysFont(None, 24)
@@ -79,15 +94,36 @@ def draw_stat_circle(surface: pygame.Surface, value: int, center_x: int, center_
     surface.blit(value_surface, (value_x, value_y))
 
 
-def draw_hand(surface: pygame.Surface, hand: Hand):
-    """Draws all cards in the hand evenly spaced across the bottom of the screen."""
+def draw_hand(surface: pygame.Surface, hand: Hand, selected_card: Unit, current_mana: int) -> list[tuple]:
+    """Draws all cards in the hand and returns a list of (card, rect) for click detection."""
     total_hand_width = len(hand.cards) * CARD_WIDTH + (len(hand.cards) - 1) * CARD_SPACING
     start_x = (SCREEN_WIDTH - total_hand_width) // 2
+    card_rects = []
 
     for index, card in enumerate(hand.cards):
         card_x = start_x + index * (CARD_WIDTH + CARD_SPACING)
+        is_selected = card is selected_card
+        is_affordable = current_mana >= card.mana_cost
         if isinstance(card, Unit):
-            draw_unit_card(surface, card, card_x, HAND_Y_POSITION)
+            draw_unit_card(surface, card, card_x, HAND_Y_POSITION, is_selected=is_selected, is_affordable=is_affordable)
+        card_rects.append((card, pygame.Rect(card_x, HAND_Y_POSITION, CARD_WIDTH, CARD_HEIGHT)))
+
+    return card_rects
+
+
+def draw_player_board(surface: pygame.Surface, board: list) -> list[tuple]:
+    """Draws all units on the player board and returns a list of (card, rect)."""
+    total_board_width = len(board) * CARD_WIDTH + (len(board) - 1) * CARD_SPACING
+    start_x = (SCREEN_WIDTH - total_board_width) // 2
+    card_rects = []
+
+    for index, unit in enumerate(board):
+        card_x = start_x + index * (CARD_WIDTH + CARD_SPACING)
+        card_y = PLAYER_BOARD_Y + (BOARD_ZONE_HEIGHT - CARD_HEIGHT) // 2
+        draw_unit_card(surface, unit, card_x, card_y)
+        card_rects.append((unit, pygame.Rect(card_x, card_y, CARD_WIDTH, CARD_HEIGHT)))
+
+    return card_rects
 
 
 def draw_mana_bar(surface: pygame.Surface, current_mana: int, maximum_mana: int):
@@ -179,6 +215,11 @@ def build_test_deck() -> Deck:
     return deck
 
 
+def get_player_board_zone_rect() -> pygame.Rect:
+    """Returns the clickable rect for the player board zone."""
+    return pygame.Rect(60, PLAYER_BOARD_Y, SCREEN_WIDTH - 140, BOARD_ZONE_HEIGHT)
+
+
 def main():
     pygame.init()
     screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
@@ -186,6 +227,9 @@ def main():
     clock = pygame.time.Clock()
 
     game_state = GameState(player_deck=build_test_deck())
+    selected_card = None
+    hand_card_rects = []
+    end_turn_button_rect = pygame.Rect(0, 0, 0, 0)
 
     running = True
     while running:
@@ -193,16 +237,41 @@ def main():
             if event.type == pygame.QUIT:
                 running = False
 
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    selected_card = None
+
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                if end_turn_button_rect.collidepoint(event.pos):
+                mouse_position = event.pos
+
+                if end_turn_button_rect.collidepoint(mouse_position):
                     if game_state.is_player_turn():
+                        selected_card = None
                         game_state.end_player_turn()
-                        # Boss instantly passes back for now.
                         game_state.begin_player_turn()
+
+                clicked_hand_card = None
+                for card, card_rect in hand_card_rects:
+                    if card_rect.collidepoint(mouse_position):
+                        clicked_hand_card = card
+                        break
+
+                if clicked_hand_card is not None:
+                    if clicked_hand_card is selected_card:
+                        selected_card = None
+                    else:
+                        selected_card = clicked_hand_card
+
+                elif selected_card is not None:
+                    if get_player_board_zone_rect().collidepoint(mouse_position):
+                        success = game_state.play_card_to_board(selected_card)
+                        if success:
+                            selected_card = None
 
         screen.fill(BACKGROUND_COLOUR)
         draw_board_zones(screen)
-        draw_hand(screen, game_state.player_hand)
+        draw_player_board(screen, game_state.player_board)
+        hand_card_rects = draw_hand(screen, game_state.player_hand, selected_card, game_state.current_mana)
         draw_mana_bar(screen, game_state.current_mana, game_state.maximum_mana)
         draw_health(screen, game_state.player_health, "Your Health", 20, PLAYER_BOARD_Y - 52, COLOUR_HEALTH_PLAYER)
         draw_health(screen, game_state.boss_health, "Boss Health", 20, BOSS_BOARD_Y + BOARD_ZONE_HEIGHT + 8,
