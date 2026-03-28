@@ -2,6 +2,7 @@ import pygame
 from card import Unit
 from deck import Deck
 from hand import Hand
+from game_state import GameState
 
 # --- Constants ---
 SCREEN_WIDTH = 1200
@@ -13,14 +14,29 @@ BACKGROUND_COLOUR = (30, 30, 40)
 CARD_WIDTH = 140
 CARD_HEIGHT = 200
 CARD_SPACING = 20
-HAND_Y_POSITION = SCREEN_HEIGHT - CARD_HEIGHT - 20
+
+# --- Board Layout ---
+PLAYER_BOARD_Y = SCREEN_HEIGHT // 2 + 30
+BOSS_BOARD_Y = 60
+BOARD_ZONE_HEIGHT = 150
+HAND_Y_POSITION = SCREEN_HEIGHT - CARD_HEIGHT - 10
+
+# --- Colours ---
+COLOUR_MANA_FILL = (30, 80, 200)
+COLOUR_MANA_EMPTY = (20, 20, 50)
+COLOUR_HEALTH_PLAYER = (60, 180, 60)
+COLOUR_HEALTH_BOSS = (180, 60, 60)
+COLOUR_BUTTON_ACTIVE = (60, 140, 60)
+COLOUR_BUTTON_INACTIVE = (80, 80, 80)
+COLOUR_TEXT_DEFAULT = (255, 255, 255)
+COLOUR_STAT_ATTACK = (255, 200, 50)
+COLOUR_STAT_HEALTH = (220, 80, 80)
+COLOUR_STAT_MANA = (100, 150, 255)
 
 
 def draw_unit_card(surface: pygame.Surface, unit: Unit, x: int, y: int):
     """Draws a placeholder unit card at the given position."""
-    # Card background
     pygame.draw.rect(surface, (60, 60, 80), (x, y, CARD_WIDTH, CARD_HEIGHT), border_radius=8)
-    # Card border
     pygame.draw.rect(surface, (200, 200, 220), (x, y, CARD_WIDTH, CARD_HEIGHT), width=2, border_radius=8)
 
     font_name_text = pygame.font.SysFont(None, 19)
@@ -36,39 +52,31 @@ def draw_unit_card(surface: pygame.Surface, unit: Unit, x: int, y: int):
     pygame.draw.rect(surface, (40, 40, 60), (x + 4, name_banner_y, CARD_WIDTH - 8, 22))
 
     # Name text centred in banner
-    name_surface = font_name_text.render(unit.name, True, (255, 255, 255))
+    name_surface = font_name_text.render(unit.name, True, COLOUR_TEXT_DEFAULT)
     name_x = x + (CARD_WIDTH - name_surface.get_width()) // 2
     surface.blit(name_surface, (name_x, name_banner_y + 3))
 
     # Mana cost (top left circle)
-    mana_circle_x = x + 14
-    mana_circle_y = y + 14
-    pygame.draw.circle(surface, (30, 80, 200), (mana_circle_x, mana_circle_y), 12)
-    pygame.draw.circle(surface, (100, 150, 255), (mana_circle_x, mana_circle_y), 12, width=2)
-    mana_surface = font_stats_text.render(str(unit.mana_cost), True, (255, 255, 255))
-    mana_text_x = mana_circle_x - mana_surface.get_width() // 2
-    mana_text_y = mana_circle_y - mana_surface.get_height() // 2
-    surface.blit(mana_surface, (mana_text_x, mana_text_y))
+    draw_stat_circle(surface, unit.mana_cost, x + 14, y + 14, COLOUR_MANA_FILL, COLOUR_STAT_MANA, font_stats_text)
 
     # Attack (bottom left)
-    attack_circle_x = x + 14
-    attack_circle_y = y + CARD_HEIGHT - 14
-    pygame.draw.circle(surface, (180, 140, 20), (attack_circle_x, attack_circle_y), 12)
-    pygame.draw.circle(surface, (255, 200, 50), (attack_circle_x, attack_circle_y), 12, width=2)
-    attack_surface = font_stats_text.render(str(unit.attack), True, (255, 255, 255))
-    attack_text_x = attack_circle_x - attack_surface.get_width() // 2
-    attack_text_y = attack_circle_y - attack_surface.get_height() // 2
-    surface.blit(attack_surface, (attack_text_x, attack_text_y))
+    draw_stat_circle(surface, unit.attack, x + 14, y + CARD_HEIGHT - 14, (180, 140, 20), COLOUR_STAT_ATTACK,
+                     font_stats_text)
 
     # Health (bottom right)
-    health_circle_x = x + CARD_WIDTH - 14
-    health_circle_y = y + CARD_HEIGHT - 14
-    pygame.draw.circle(surface, (160, 30, 30), (health_circle_x, health_circle_y), 12)
-    pygame.draw.circle(surface, (220, 80, 80), (health_circle_x, health_circle_y), 12, width=2)
-    health_surface = font_stats_text.render(str(unit.health), True, (255, 255, 255))
-    health_text_x = health_circle_x - health_surface.get_width() // 2
-    health_text_y = health_circle_y - health_surface.get_height() // 2
-    surface.blit(health_surface, (health_text_x, health_text_y))
+    draw_stat_circle(surface, unit.health, x + CARD_WIDTH - 14, y + CARD_HEIGHT - 14, (160, 30, 30), COLOUR_STAT_HEALTH,
+                     font_stats_text)
+
+
+def draw_stat_circle(surface: pygame.Surface, value: int, center_x: int, center_y: int, fill_colour: tuple,
+                     border_colour: tuple, font: pygame.font.Font):
+    """Draws a filled circle with a number inside, used for card stats."""
+    pygame.draw.circle(surface, fill_colour, (center_x, center_y), 12)
+    pygame.draw.circle(surface, border_colour, (center_x, center_y), 12, width=2)
+    value_surface = font.render(str(value), True, COLOUR_TEXT_DEFAULT)
+    value_x = center_x - value_surface.get_width() // 2
+    value_y = center_y - value_surface.get_height() // 2
+    surface.blit(value_surface, (value_x, value_y))
 
 
 def draw_hand(surface: pygame.Surface, hand: Hand):
@@ -80,6 +88,79 @@ def draw_hand(surface: pygame.Surface, hand: Hand):
         card_x = start_x + index * (CARD_WIDTH + CARD_SPACING)
         if isinstance(card, Unit):
             draw_unit_card(surface, card, card_x, HAND_Y_POSITION)
+
+
+def draw_mana_bar(surface: pygame.Surface, current_mana: int, maximum_mana: int):
+    """Draws the mana pip bar in the bottom right corner."""
+    font = pygame.font.SysFont(None, 22)
+    pip_radius = 10
+    pip_spacing = 4
+    pip_y = SCREEN_HEIGHT // 2
+
+    # Draw pips right to left, anchored from the End Turn button edge.
+    anchor_x = SCREEN_WIDTH - 180  # leaves room for End Turn button
+    total_width = maximum_mana * (pip_radius * 2 + pip_spacing)
+    start_x = anchor_x - total_width
+
+    for index in range(maximum_mana):
+        pip_x = start_x + index * (pip_radius * 2 + pip_spacing) + pip_radius
+        colour = COLOUR_MANA_FILL if index < current_mana else COLOUR_MANA_EMPTY
+        pygame.draw.circle(surface, colour, (pip_x, pip_y), pip_radius)
+        pygame.draw.circle(surface, COLOUR_STAT_MANA, (pip_x, pip_y), pip_radius, width=2)
+
+    mana_label = font.render(f"{current_mana} / {maximum_mana}", True, COLOUR_TEXT_DEFAULT)
+    label_x = start_x + (total_width - mana_label.get_width()) // 2
+    surface.blit(mana_label, (label_x, pip_y + pip_radius + 4))
+
+
+def draw_health(surface: pygame.Surface, health: int, label: str, x: int, y: int, colour: tuple):
+    """Draws a health display for the player or boss."""
+    font_label = pygame.font.SysFont(None, 22)
+    font_value = pygame.font.SysFont(None, 36)
+
+    label_surface = font_label.render(label, True, COLOUR_TEXT_DEFAULT)
+    surface.blit(label_surface, (x, y))
+
+    health_surface = font_value.render(str(health), True, colour)
+    surface.blit(health_surface, (x, y + 20))
+
+
+def draw_end_turn_button(surface: pygame.Surface, is_player_turn: bool) -> pygame.Rect:
+    """Draws the End Turn button and returns its rect for click detection."""
+    button_width = 140
+    button_height = 50
+    button_x = SCREEN_WIDTH - button_width - 20
+    button_y = SCREEN_HEIGHT // 2 - button_height // 2
+
+    colour = COLOUR_BUTTON_ACTIVE if is_player_turn else COLOUR_BUTTON_INACTIVE
+    button_rect = pygame.Rect(button_x, button_y, button_width, button_height)
+    pygame.draw.rect(surface, colour, button_rect, border_radius=8)
+    pygame.draw.rect(surface, COLOUR_TEXT_DEFAULT, button_rect, width=2, border_radius=8)
+
+    font = pygame.font.SysFont(None, 26)
+    label = "End Turn" if is_player_turn else "Boss Turn..."
+    label_surface = font.render(label, True, COLOUR_TEXT_DEFAULT)
+    label_x = button_x + (button_width - label_surface.get_width()) // 2
+    label_y = button_y + (button_height - label_surface.get_height()) // 2
+    surface.blit(label_surface, (label_x, label_y))
+
+    return button_rect
+
+
+def draw_board_zones(surface: pygame.Surface):
+    """Draws the player and boss board zone outlines."""
+    player_zone = pygame.Rect(60, PLAYER_BOARD_Y, SCREEN_WIDTH - 140, BOARD_ZONE_HEIGHT)
+    boss_zone = pygame.Rect(60, BOSS_BOARD_Y, SCREEN_WIDTH - 140, BOARD_ZONE_HEIGHT)
+    pygame.draw.rect(surface, (50, 50, 70), player_zone, border_radius=8)
+    pygame.draw.rect(surface, (70, 50, 50), boss_zone, border_radius=8)
+    pygame.draw.rect(surface, (80, 80, 100), player_zone, width=1, border_radius=8)
+    pygame.draw.rect(surface, (100, 80, 80), boss_zone, width=1, border_radius=8)
+
+    font = pygame.font.SysFont(None, 20)
+    player_label = font.render("Your Board", True, (120, 120, 150))
+    boss_label = font.render("Boss Board", True, (150, 120, 120))
+    surface.blit(player_label, (70, PLAYER_BOARD_Y + 6))
+    surface.blit(boss_label, (70, BOSS_BOARD_Y + 6))
 
 
 def build_test_deck() -> Deck:
@@ -104,14 +185,7 @@ def main():
     pygame.display.set_caption("Card Game")
     clock = pygame.time.Clock()
 
-    deck = build_test_deck()
-    hand = Hand()
-
-    # Draw 4 cards into the starting hand
-    for _ in range(4):
-        drawn_card = deck.draw()
-        if drawn_card is not None:
-            hand.add_card(drawn_card)
+    game_state = GameState(player_deck=build_test_deck())
 
     running = True
     while running:
@@ -119,8 +193,22 @@ def main():
             if event.type == pygame.QUIT:
                 running = False
 
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if end_turn_button_rect.collidepoint(event.pos):
+                    if game_state.is_player_turn():
+                        game_state.end_player_turn()
+                        # Boss instantly passes back for now.
+                        game_state.begin_player_turn()
+
         screen.fill(BACKGROUND_COLOUR)
-        draw_hand(screen, hand)
+        draw_board_zones(screen)
+        draw_hand(screen, game_state.player_hand)
+        draw_mana_bar(screen, game_state.current_mana, game_state.maximum_mana)
+        draw_health(screen, game_state.player_health, "Your Health", 20, PLAYER_BOARD_Y - 52, COLOUR_HEALTH_PLAYER)
+        draw_health(screen, game_state.boss_health, "Boss Health", 20, BOSS_BOARD_Y + BOARD_ZONE_HEIGHT + 8,
+                    COLOUR_HEALTH_BOSS)
+        end_turn_button_rect = draw_end_turn_button(screen, game_state.is_player_turn())
+
         pygame.display.flip()
         clock.tick(FPS)
 
