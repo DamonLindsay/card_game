@@ -1,6 +1,7 @@
 from deck import Deck
 from hand import Hand
 from card import Unit
+from boss import Boss, build_boss_deck
 
 
 class GameState:
@@ -22,6 +23,11 @@ class GameState:
         self.player_hand = Hand()
         self.player_board = []
         self.boss_board = []
+
+        self.player_board_snapshot = []
+        self.boss_board_snapshot = []
+
+        self.boss = Boss(name="The Swamp King", deck=build_boss_deck())
 
         self.draw_opening_hand()
 
@@ -80,3 +86,18 @@ class GameState:
         self.player_hand.remove_card(card)
         self.player_board.append(card)
         return True
+
+    def apply_combat_results(self):
+        """Removes dead units from both boards after combat resolves."""
+        self.player_board = [unit for unit in self.player_board if unit.is_alive()]
+        self.boss_board = [unit for unit in self.boss_board if unit.is_alive()]
+
+    def save_board_snapshot(self):
+        """Saves a copy of both boards before combat begins."""
+        self.player_board_snapshot = [unit.copy() for unit in self.player_board]
+        self.boss_board_snapshot = [unit.copy() for unit in self.boss_board]
+
+    def restore_boards_from_snapshot(self):
+        """Restores both boards to their pre-combat state after combat ends."""
+        self.player_board = self.player_board_snapshot
+        self.boss_board = self.boss_board_snapshot

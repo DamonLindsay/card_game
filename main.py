@@ -3,12 +3,15 @@ from card import Unit
 from deck import Deck
 from hand import Hand
 from game_state import GameState
+from combat import build_combat_event_queue
+from boss import Boss
 
 # --- Constants ---
 SCREEN_WIDTH = 1200
 SCREEN_HEIGHT = 720
 FPS = 60
 BACKGROUND_COLOUR = (30, 30, 40)
+COMBAT_EVENT_DELAY_MILLISECONDS = 600
 
 # --- Card Dimensions ---
 CARD_WIDTH = 140
@@ -126,6 +129,21 @@ def draw_player_board(surface: pygame.Surface, board: list) -> list[tuple]:
     return card_rects
 
 
+def draw_boss_board(surface: pygame.Surface, board: list) -> list[tuple]:
+    """Draws all units on the boss board and returns a list of (unit, rect)."""
+    total_board_width = len(board) * CARD_WIDTH + (len(board) - 1) * CARD_SPACING
+    start_x = (SCREEN_WIDTH - total_board_width) // 2
+    card_rects = []
+
+    for index, unit in enumerate(board):
+        card_x = start_x + index * (CARD_WIDTH + CARD_SPACING)
+        card_y = BOSS_BOARD_Y + (BOARD_ZONE_HEIGHT - CARD_HEIGHT) // 2
+        draw_unit_card(surface, unit, card_x, card_y)
+        card_rects.append((unit, pygame.Rect(card_x, card_y, CARD_WIDTH, CARD_HEIGHT)))
+
+    return card_rects
+
+
 def draw_mana_bar(surface: pygame.Surface, current_mana: int, maximum_mana: int):
     """Draws the mana pip bar in the bottom right corner."""
     font = pygame.font.SysFont(None, 22)
@@ -231,8 +249,14 @@ def main():
     hand_card_rects = []
     end_turn_button_rect = pygame.Rect(0, 0, 0, 0)
 
+    combat_event_queue = []
+    last_combat_event_time = 0
+    is_in_combat = False
+
     running = True
     while running:
+        current_time = pygame.time.get_ticks()
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
@@ -245,38 +269,56 @@ def main():
                 mouse_position = event.pos
 
                 if end_turn_button_rect.collidepoint(mouse_position):
-                    if game_state.is_player_turn():
+                    if game_state.is_player_turn() and not is_in_combat:
                         selected_card = None
                         game_state.end_player_turn()
-                        game_state.begin_player_turn()
+                        game_state.boss.take_turn(game_state.boss_board)
+                        game_state.save_board_snapshot()
+                        combat_event_queue = build_combat_event_queue(game_state)
+                        last_combat_event_time = current_time
+                        is_in_combat = True
 
-                clicked_hand_card = None
-                for card, card_rect in hand_card_rects:
-                    if card_rect.collidepoint(mouse_position):
-                        clicked_hand_card = card
-                        break
+                if not is_in_combat:
+                    clicked_hand_card = None
+                    for card, card_rect in hand_card_rects:
+                        if card_rect.collidepoint(mouse_position):
+                            clicked_hand_card = card
+                            break
 
-                if clicked_hand_card is not None:
-                    if clicked_hand_card is selected_card:
-                        selected_card = None
-                    else:
-                        selected_card = clicked_hand_card
-
-                elif selected_card is not None:
-                    if get_player_board_zone_rect().collidepoint(mouse_position):
-                        success = game_state.play_card_to_board(selected_card)
-                        if success:
+                    if clicked_hand_card is not None:
+                        if clicked_hand_card is selected_card:
                             selected_card = None
+                        else:
+                            selected_card = clicked_hand_card
+
+                    elif selected_card is not None:
+                        if get_player_board_zone_rect().collidepoint(mouse_position):
+                            success = game_state.play_card_to_board(selected_card)
+                            if success:
+                                selected_card = None
+
+        # Process one combat event per tick based on delay timer
+        if is_in_combat and current_time - last_combat_event_time >= COMBAT_EVENT_DELAY_MILLISECONDS:
+            if combat_event_queue:
+                combat_event = combat_event_queue.pop(0)
+
+                if combat_event["type"] == "combat_end":
+                    game_state.restore_boards_from_snapshot()
+                    is_in_combat = False
+                    game_state.begin_player_turn()
+
+                last_combat_event_time = current_time
 
         screen.fill(BACKGROUND_COLOUR)
         draw_board_zones(screen)
+        draw_boss_board(screen, game_state.boss_board)
         draw_player_board(screen, game_state.player_board)
         hand_card_rects = draw_hand(screen, game_state.player_hand, selected_card, game_state.current_mana)
         draw_mana_bar(screen, game_state.current_mana, game_state.maximum_mana)
         draw_health(screen, game_state.player_health, "Your Health", 20, PLAYER_BOARD_Y - 52, COLOUR_HEALTH_PLAYER)
         draw_health(screen, game_state.boss_health, "Boss Health", 20, BOSS_BOARD_Y + BOARD_ZONE_HEIGHT + 8,
                     COLOUR_HEALTH_BOSS)
-        end_turn_button_rect = draw_end_turn_button(screen, game_state.is_player_turn())
+        end_turn_button_rect = draw_end_turn_button(screen, game_state.is_player_turn() and not is_in_combat)
 
         pygame.display.flip()
         clock.tick(FPS)
