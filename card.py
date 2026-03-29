@@ -17,6 +17,8 @@ class Unit(Card):
         self.mana_cost = mana_cost
         self.tribes = tribes if tribes is not None else []
         self.has_taunt = has_taunt
+        self.base_attack = attack
+        self.max_health = health
 
     def take_damage(self, amount: int):
         self.health -= amount

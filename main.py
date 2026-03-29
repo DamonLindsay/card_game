@@ -16,6 +16,7 @@ BACKGROUND_COLOUR = (30, 30, 40)
 COMBAT_EVENT_DELAY_MILLISECONDS = 800
 COMBAT_SLIDE_DURATION_MILLISECONDS = 500
 DAMAGE_POPUP_DURATION_MILLISECONDS = 1500
+TOKEN_DAMAGE_POPUP_DURATION_MILLISECONDS = 800
 
 # --- Card Dimensions ---
 CARD_WIDTH = 140
@@ -451,6 +452,8 @@ class UnitAnimationState:
         self.pending_display_health = unit.health  # ← shown after collision
         self.hero_hit_target = None  # "boss" or "player" if this is a hero hit
         self.hero_hit_damage = 0  # damage to apply at collision midpoint
+        self.damage_popup_amount = 0  # damage to show as popup at collision
+        self.damage_popup_triggered = False  # whether popup has been spawned yet
 
 
 def build_animation_states(board: list, board_y: int) -> list[UnitAnimationState]:
@@ -472,7 +475,8 @@ def build_animation_states(board: list, board_y: int) -> list[UnitAnimationState
 
 def update_animation_states(animation_states: list[UnitAnimationState],
                             pending_damage_map: dict, current_time: int,
-                            game_state=None, damage_popup_queue: list = None):
+                            game_state=None, damage_popup_queue: list = None,
+                            token_damage_popups: list = None):
     """Updates all unit animation positions and reveals damage at collision point."""
     for animation_state in animation_states:
         if not animation_state.is_animating:
@@ -498,7 +502,6 @@ def update_animation_states(animation_states: list[UnitAnimationState],
             if game_state is not None and animation_state.hero_hit_target is not None:
                 game_state.apply_single_unit_damage(
                     animation_state.hero_hit_target, animation_state.hero_hit_damage)
-                # Add popup at collision moment, not when event fires
                 if damage_popup_queue is not None:
                     damage_popup_queue.append({
                         "target": animation_state.hero_hit_target,
@@ -506,6 +509,20 @@ def update_animation_states(animation_states: list[UnitAnimationState],
                     })
                 animation_state.hero_hit_target = None
                 animation_state.hero_hit_damage = 0
+
+            # Spawn token damage popup at current animated position
+            if (token_damage_popups is not None and
+                    animation_state.damage_popup_amount > 0 and
+                    not animation_state.damage_popup_triggered):
+                token_damage_popups.append({
+                    "animation_state": animation_state,
+                    "amount": animation_state.damage_popup_amount,
+                    "start_time": current_time,
+                    "track": animation_state.slide_distance > 20,  # True for attacker, False for defender
+                    "fixed_x": animation_state.current_x + 60,
+                    "fixed_y": animation_state.current_y + 70,
+                })
+                animation_state.damage_popup_triggered = True
 
         if progress >= 1.0:
             animation_state.current_x = animation_state.base_x
@@ -709,30 +726,39 @@ def draw_unit_token(surface: pygame.Surface, unit: Unit, x: int, y: int,
     border_colour = (200, 180, 120) if unit.has_taunt else (160, 140, 100)
     pygame.draw.ellipse(surface, border_colour, token_rect, width=3)
 
-    # Attack circle (bottom left)
     font_stats = pygame.font.SysFont(None, 30)
+
+    # Attack circle (bottom left)
     attack_circle_x = x + 14
     attack_circle_y = y + token_height - 10
+    attack_colour = COLOUR_TEXT_DEFAULT
+    if unit.attack < unit.base_attack:
+        attack_colour = (220, 80, 80)
+    elif unit.attack > unit.base_attack:
+        attack_colour = (80, 220, 80)
     pygame.draw.circle(surface, (180, 140, 20), (attack_circle_x, attack_circle_y), 16)
     pygame.draw.circle(surface, (255, 200, 50), (attack_circle_x, attack_circle_y), 16, width=2)
-    attack_surface = font_stats.render(str(unit.attack), True, COLOUR_TEXT_DEFAULT)
-    attack_x = attack_circle_x - attack_surface.get_width() // 2
-    attack_y = attack_circle_y - attack_surface.get_height() // 2
-    surface.blit(attack_surface, (attack_x, attack_y))
+    attack_surface = font_stats.render(str(unit.attack), True, attack_colour)
+    surface.blit(attack_surface, (attack_circle_x - attack_surface.get_width() // 2,
+                                  attack_circle_y - attack_surface.get_height() // 2))
 
     # Health circle (bottom right)
     shown_health = display_health if display_health is not None else unit.health
     health_circle_x = x + token_width - 14
     health_circle_y = y + token_height - 10
+    health_colour_text = COLOUR_TEXT_DEFAULT
+    if shown_health < unit.max_health:
+        health_colour_text = (220, 80, 80)
+    elif shown_health > unit.max_health:
+        health_colour_text = (80, 220, 80)
     health_colour_fill = (160, 30, 30) if shown_health > 0 else (80, 80, 80)
     pygame.draw.circle(surface, health_colour_fill, (health_circle_x, health_circle_y), 16)
     pygame.draw.circle(surface, (220, 80, 80), (health_circle_x, health_circle_y), 16, width=2)
-    health_surface = font_stats.render(str(shown_health), True, COLOUR_TEXT_DEFAULT)
-    health_x = health_circle_x - health_surface.get_width() // 2
-    health_y = health_circle_y - health_surface.get_height() // 2
-    surface.blit(health_surface, (health_x, health_y))
+    health_surface = font_stats.render(str(shown_health), True, health_colour_text)
+    surface.blit(health_surface, (health_circle_x - health_surface.get_width() // 2,
+                                  health_circle_y - health_surface.get_height() // 2))
 
-    # Mana cost (top left) — add this after the token borderline
+    # Mana cost (top left)
     font_mana = pygame.font.SysFont(None, 22)
     mana_circle_x = x + 14
     mana_circle_y = y + 14
@@ -856,6 +882,32 @@ def trigger_hero_hit_animation(animation_states: list, attacking_unit: Unit,
     attacker_state.hero_hit_damage = damage
 
 
+def draw_token_damage_popup(surface: pygame.Surface, popup: dict, current_time: int):
+    """Draws a damage number that follows the attacker or stays fixed for the defender."""
+    elapsed = current_time - popup["start_time"]
+    if elapsed < 0 or elapsed > TOKEN_DAMAGE_POPUP_DURATION_MILLISECONDS:
+        return
+
+    alpha = int(255 * (1 - elapsed / TOKEN_DAMAGE_POPUP_DURATION_MILLISECONDS))
+
+    if popup["track"]:
+        animation_state = popup["animation_state"]
+        draw_x = animation_state.current_x + 60
+        draw_y = animation_state.current_y + 70
+    else:
+        draw_x = popup["fixed_x"]
+        draw_y = popup["fixed_y"]
+
+    font = pygame.font.SysFont(None, 42)
+    text = f"-{popup['amount']}"
+    text_surface = font.render(text, True, (255, 80, 80))
+    text_surface.set_alpha(alpha)
+    surface.blit(text_surface, (
+        draw_x - text_surface.get_width() // 2,
+        draw_y - text_surface.get_height() // 2
+    ))
+
+
 def main():
     pygame.init()
 
@@ -886,6 +938,7 @@ def main():
     round_damage_popup = None
     damage_popup_queue = []
     last_damage_popup_time = 0
+    token_damage_popups = []
 
     running = True
     while running:
@@ -1006,15 +1059,20 @@ def main():
                                 target: {"damage_received": combat_event["damage_to_target"]},
                             }
 
+                            # Add token damage popups at the unit positions
                             for state in player_animation_states + boss_animation_states:
                                 if state.unit is attacker:
                                     state.display_health = combat_event["attacker_health_before"]
                                     state.pending_display_health = combat_event["attacker_health_after"]
                                     state.damage_applied = False
+                                    state.damage_popup_amount = combat_event["damage_to_attacker"]
+                                    state.damage_popup_triggered = False
                                 elif state.unit is target:
                                     state.display_health = combat_event["target_health_before"]
                                     state.pending_display_health = combat_event["target_health_after"]
                                     state.damage_applied = False
+                                    state.damage_popup_amount = combat_event["damage_to_target"]
+                                    state.damage_popup_triggered = False
 
                             trigger_attack_animation(
                                 player_animation_states, attacker, target,
@@ -1068,10 +1126,10 @@ def main():
 
                         last_combat_event_time = current_time
 
-            update_animation_states(player_animation_states, pending_damage_map, current_time, game_state,
-                                    damage_popup_queue)
-            update_animation_states(boss_animation_states, pending_damage_map, current_time, game_state,
-                                    damage_popup_queue)
+            update_animation_states(player_animation_states, pending_damage_map, current_time,
+                                    game_state, damage_popup_queue, token_damage_popups)
+            update_animation_states(boss_animation_states, pending_damage_map, current_time,
+                                    game_state, damage_popup_queue, token_damage_popups)
 
         # ===========================
         # --- Popup Processing ---
@@ -1089,6 +1147,12 @@ def main():
                     "start_time": current_time,
                 }
                 last_damage_popup_time = current_time
+
+            # Remove expired token damage popups
+            token_damage_popups = [
+                popup for popup in token_damage_popups
+                if current_time - popup["start_time"] < TOKEN_DAMAGE_POPUP_DURATION_MILLISECONDS
+            ]
 
         # =====================
         # --- Drawing ---
@@ -1110,6 +1174,9 @@ def main():
                 screen, displayed_boss_board,
                 boss_animation_states if is_in_combat else None)
             draw_player_board(screen, game_state.player_board, player_animation_states)
+
+            for popup in token_damage_popups:
+                draw_token_damage_popup(screen, popup, current_time)
 
             draw_hero_portrait(
                 screen, name="The Swamp King", health=game_state.boss_health,
