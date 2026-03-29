@@ -370,6 +370,8 @@ class UnitAnimationState:
         self.damage_applied = False
         self.display_health = unit.health  # ← shown before collision
         self.pending_display_health = unit.health  # ← shown after collision
+        self.hero_hit_target = None  # "boss" or "player" if this is a hero hit
+        self.hero_hit_damage = 0  # damage to apply at collision midpoint
 
 
 def build_animation_states(board: list, board_y: int) -> list[UnitAnimationState]:
@@ -390,7 +392,8 @@ def build_animation_states(board: list, board_y: int) -> list[UnitAnimationState
 
 
 def update_animation_states(animation_states: list[UnitAnimationState],
-                            pending_damage_map: dict, current_time: int):
+                            pending_damage_map: dict, current_time: int,
+                            game_state=None, damage_popup_queue: list = None):
     """Updates all unit animation positions and reveals damage at collision point."""
     for animation_state in animation_states:
         if not animation_state.is_animating:
@@ -409,10 +412,21 @@ def update_animation_states(animation_states: list[UnitAnimationState],
         animation_state.current_y = animation_state.base_y + int(
             animation_state.animation_direction_y * slide_amount)
 
-        # Reveal post-damage health at the collision midpoint
         if progress >= 0.5 and not animation_state.damage_applied:
             animation_state.display_health = animation_state.pending_display_health
             animation_state.damage_applied = True
+
+            if game_state is not None and animation_state.hero_hit_target is not None:
+                game_state.apply_single_unit_damage(
+                    animation_state.hero_hit_target, animation_state.hero_hit_damage)
+                # Add popup at collision moment, not when event fires
+                if damage_popup_queue is not None:
+                    damage_popup_queue.append({
+                        "target": animation_state.hero_hit_target,
+                        "amount": animation_state.hero_hit_damage,
+                    })
+                animation_state.hero_hit_target = None
+                animation_state.hero_hit_damage = 0
 
         if progress >= 1.0:
             animation_state.current_x = animation_state.base_x
@@ -735,7 +749,7 @@ def draw_damage_popup(surface: pygame.Surface, popup: dict, current_time: int):
 
 
 def trigger_hero_hit_animation(animation_states: list, attacking_unit: Unit,
-                               target: str, start_time: int):
+                               target: str, start_time: int, damage: int):
     """Triggers a slide animation for a unit attacking the hero portrait directly."""
     attacker_state = next((s for s in animation_states if s.unit is attacking_unit), None)
     if attacker_state is None:
@@ -759,6 +773,8 @@ def trigger_hero_hit_animation(animation_states: list, attacking_unit: Unit,
     attacker_state.animation_start_time = start_time
     attacker_state.damage_applied = False
     attacker_state.pending_display_health = attacking_unit.health
+    attacker_state.hero_hit_target = target
+    attacker_state.hero_hit_damage = damage
 
 
 def main():
@@ -949,22 +965,19 @@ def main():
                             boss_animation_states = [
                                 s for s in boss_animation_states if s.unit is not dead_unit]
 
+
+
                         elif combat_event["type"] == "hero_hit":
                             attacker = combat_event["attacker"]
                             target = combat_event["target"]
                             trigger_hero_hit_animation(
-                                player_animation_states, attacker, target, current_time)
+                                player_animation_states, attacker, target, current_time, combat_event["damage"])
                             trigger_hero_hit_animation(
-                                boss_animation_states, attacker, target, current_time)
-                            damage_popup_queue.append({
-                                "target": target,
-                                "amount": combat_event["damage"],
-                            })
+                                boss_animation_states, attacker, target, current_time, combat_event["damage"])
+                            # ← popup is now triggered at collision midpoint, not here
+
 
                         elif combat_event["type"] == "combat_end":
-                            game_state.apply_combat_damage(
-                                combat_event["surviving_player_units"],
-                                combat_event["surviving_boss_units"])
                             game_state.restore_boards_from_snapshot()
                             player_animation_states = []
                             boss_animation_states = []
@@ -974,8 +987,10 @@ def main():
 
                         last_combat_event_time = current_time
 
-            update_animation_states(player_animation_states, pending_damage_map, current_time)
-            update_animation_states(boss_animation_states, pending_damage_map, current_time)
+            update_animation_states(player_animation_states, pending_damage_map, current_time, game_state,
+                                    damage_popup_queue)
+            update_animation_states(boss_animation_states, pending_damage_map, current_time, game_state,
+                                    damage_popup_queue)
 
         # ===========================
         # --- Popup Processing ---

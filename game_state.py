@@ -114,3 +114,10 @@ class GameState:
         elif surviving_boss_units and not surviving_player_units:
             for unit in surviving_boss_units:
                 self.player_health -= unit.mana_cost
+
+    def apply_single_unit_damage(self, target: str, amount: int):
+        """Applies damage from a single surviving unit to the target hero."""
+        if target == "boss":
+            self.boss_health -= amount
+        else:
+            self.player_health -= amount
