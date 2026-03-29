@@ -95,11 +95,6 @@ class GameState:
         self.player_board.append(card)
         return True
 
-    def apply_combat_results(self):
-        """Removes dead units from both boards after combat resolves."""
-        self.player_board = [unit for unit in self.player_board if unit.is_alive()]
-        self.boss_board = [unit for unit in self.boss_board if unit.is_alive()]
-
     def save_board_snapshot(self):
         """Saves a copy of both boards before combat begins."""
         self.player_board_snapshot = [unit.copy() for unit in self.player_board]

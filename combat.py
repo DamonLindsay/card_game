@@ -12,57 +12,6 @@ def get_valid_targets(board: list[Unit]) -> list[Unit]:
     return list(board)
 
 
-def resolve_attack(attacker: Unit, target: Unit) -> list[dict]:
-    """Records an attack between two units without applying damage yet.
-    Damage is applied visually during animation playback."""
-    events = []
-
-    attacker_damage = attacker.attack
-    target_damage = target.attack
-
-    events.append({
-        "type": "attack",
-        "attacker": attacker,
-        "target": target,
-        "damage_to_target": attacker_damage,
-        "damage_to_attacker": target_damage,
-    })
-
-    # Pre-calculate deaths based on pending damage so we can queue the events
-    if target.health - attacker_damage <= 0:
-        events.append({"type": "unit_will_die", "unit": target,
-                       "damage_to_target": attacker_damage, "damage_to_attacker": target_damage})
-    if attacker.health - target_damage <= 0:
-        events.append({"type": "unit_will_die", "unit": attacker,
-                       "damage_to_target": attacker_damage, "damage_to_attacker": target_damage})
-
-    # Still apply damage to the actual units so subsequent combat logic is correct
-    target.take_damage(attacker_damage)
-    attacker.take_damage(target_damage)
-
-    return events
-
-
-def resolve_excess_damage_to_boss(attacker: Unit, game_state) -> list[dict]:
-    """Deals attacker damage directly to the boss when no targets remain."""
-    game_state.boss_health -= attacker.attack
-    return [{
-        "type": "direct_damage",
-        "target": "boss",
-        "damage": attacker.attack,
-    }]
-
-
-def resolve_excess_damage_to_player(attacker: Unit, game_state) -> list[dict]:
-    """Deals attacker damage directly to the player when no targets remain."""
-    game_state.player_health -= attacker.attack
-    return [{
-        "type": "direct_damage",
-        "target": "player",
-        "damage": attacker.attack,
-    }]
-
-
 def remove_dead_units(board: list[Unit]) -> list[Unit]:
     """Returns a new list with all dead units removed."""
     return [unit for unit in board if unit.is_alive()]

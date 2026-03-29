@@ -4,8 +4,6 @@ from deck import Deck
 from hand import Hand
 from game_state import GameState
 from combat import build_combat_event_queue
-from boss import Boss
-import copy
 from settings import Settings
 from menu import draw_main_menu, draw_settings_menu
 
@@ -47,7 +45,6 @@ COLOUR_STAT_HEALTH = (220, 80, 80)
 COLOUR_STAT_MANA = (100, 150, 255)
 COLOUR_CARD_SELECTED = (255, 255, 100)
 COLOUR_CARD_UNAFFORDABLE = (120, 60, 60)
-COMBAT_SLIDE_DISTANCE = 999
 
 
 def draw_unit_card(surface: pygame.Surface, unit: Unit, x: int, y: int,
@@ -251,18 +248,6 @@ def draw_boss_mana_bar(surface: pygame.Surface, current_mana: int, maximum_mana:
 
     mana_label = font.render(f"{current_mana}/{maximum_mana}", True, (255, 150, 150))
     surface.blit(mana_label, (bar_x_start, bar_y_start + gems_per_column * (gem_radius * 2 + gem_spacing) + 4))
-
-
-def draw_health(surface: pygame.Surface, health: int, label: str, x: int, y: int, colour: tuple):
-    """Draws a health display for the player or boss."""
-    font_label = pygame.font.SysFont(None, 22)
-    font_value = pygame.font.SysFont(None, 36)
-
-    label_surface = font_label.render(label, True, COLOUR_TEXT_DEFAULT)
-    surface.blit(label_surface, (x, y))
-
-    health_surface = font_value.render(str(health), True, colour)
-    surface.blit(health_surface, (x, y + 20))
 
 
 def draw_menu_button(surface: pygame.Surface, mouse_position: tuple) -> pygame.Rect:
@@ -470,13 +455,20 @@ def trigger_defender_animation(animation_states: list, defending_unit: Unit, sta
 
 def apply_new_resolution(new_width: int, new_height: int, screen: pygame.Surface):
     """Recalculates all layout constants and resizes the window when resolution changes."""
-    global SCREEN_WIDTH, SCREEN_HEIGHT, PLAYER_BOARD_Y, BOSS_BOARD_Y, HAND_Y_POSITION
+    global SCREEN_WIDTH, SCREEN_HEIGHT, BOARD_CENTRE_Y, BOSS_BOARD_Y, PLAYER_BOARD_Y
+    global BOARD_ZONE_HEIGHT, BOSS_PORTRAIT_Y, PLAYER_PORTRAIT_Y
+    global HAND_Y_POSITION, HAND_Y_POSITION_HOVERED
 
     SCREEN_WIDTH = new_width
     SCREEN_HEIGHT = new_height
-    PLAYER_BOARD_Y = SCREEN_HEIGHT // 2 + 30
-    BOSS_BOARD_Y = 60
-    HAND_Y_POSITION = SCREEN_HEIGHT - CARD_HEIGHT - 10
+    BOARD_CENTRE_Y = SCREEN_HEIGHT // 2
+    BOSS_BOARD_Y = BOARD_CENTRE_Y - 195
+    PLAYER_BOARD_Y = BOARD_CENTRE_Y + 15
+    BOARD_ZONE_HEIGHT = 175
+    BOSS_PORTRAIT_Y = 120
+    PLAYER_PORTRAIT_Y = BOARD_CENTRE_Y + 210
+    HAND_Y_POSITION = SCREEN_HEIGHT - CARD_HEIGHT + 60
+    HAND_Y_POSITION_HOVERED = SCREEN_HEIGHT - CARD_HEIGHT - 10
 
     new_screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.NOFRAME)
     return new_screen

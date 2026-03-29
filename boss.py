@@ -23,7 +23,7 @@ class Boss:
                 break
             if card.mana_cost > remaining_mana:
                 # Put the card back and stop
-                self.deck.add_card(card)
+                self.deck.cards.append(card)
                 break
             boss_board.append(card)
             remaining_mana -= card.mana_cost
