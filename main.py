@@ -388,18 +388,110 @@ def draw_end_turn_button(surface: pygame.Surface, is_player_turn: bool) -> pygam
 def draw_unit_token(surface: pygame.Surface, unit: Unit, x: int, y: int,
                     display_health: int = None):
     """Draws a Battlegrounds-style oval unit token for the board.
-    Shows art, attack, health, and a taunt indicator if applicable."""
+    Shows art, attack, health, and a taunt shield behind the token if applicable."""
     token_width = 120
     token_height = 140
 
-    # Taunt border — drawn first so it sits behind the token
+    # Draw taunt shield shape behind the token
     if unit.has_taunt:
-        taunt_border_colour = (220, 170, 30)
-        taunt_glow_rect = pygame.Rect(x - 4, y - 4, token_width + 8, token_height + 8)
-        pygame.draw.ellipse(surface, taunt_border_colour, taunt_glow_rect)
-        # Second inner glow ring
-        taunt_inner_rect = pygame.Rect(x - 2, y - 2, token_width + 4, token_height + 4)
-        pygame.draw.ellipse(surface, (255, 210, 80), taunt_inner_rect, width=2)
+        shield_colour_fill = (50, 55, 75)
+        shield_colour_border = (150, 155, 190)
+
+        cx = x + token_width // 2
+        left = x - 24
+        right = x + token_width + 24
+        top = y - 20
+        bottom = y + token_height + 30
+
+        # Trace the shield outline with many points to simulate curves
+        shield_points = []
+
+        # Top left curve (convex outward)
+        for i in range(11):
+            t = i / 10
+            px = left + (cx - left) * t
+            py = top + 18 * (t * (1 - t)) * (-3)
+            shield_points.append((px, py))
+
+        # Top centre dip (concave inward)
+        for i in range(11):
+            t = i / 10
+            px = cx + (right - cx) * t
+            py = top + 18 * (t * (1 - t)) * (-3)
+            shield_points.append((px, py))
+
+        # Right side curve
+        for i in range(11):
+            t = i / 10
+            px = right - 6 * (1 - (2 * t - 1) ** 2)
+            py = top + (bottom - top) * 0.55 * t
+            shield_points.append((px, py))
+
+        # Bottom right to point
+        for i in range(11):
+            t = i / 10
+            px = right - (right - cx) * t
+            py = top + (bottom - top) * 0.55 + (bottom - (top + (bottom - top) * 0.55)) * t
+            shield_points.append((px, py))
+
+        # Bottom point to left
+        for i in range(11):
+            t = i / 10
+            px = cx - (cx - left) * t
+            py = bottom - (bottom - (top + (bottom - top) * 0.55)) * t
+            shield_points.append((px, py))
+
+        # Left side curve
+        for i in range(11):
+            t = i / 10
+            px = left + 6 * (1 - (2 * t - 1) ** 2)
+            py = top + (bottom - top) * 0.55 * (1 - t)
+            shield_points.append((px, py))
+
+        pygame.draw.polygon(surface, shield_colour_fill, shield_points)
+        pygame.draw.polygon(surface, shield_colour_border, shield_points, width=3)
+
+        # Inner inset border line
+        inset = 6
+        cx2 = cx
+        left2 = left + inset
+        right2 = right - inset
+        top2 = top + inset
+        bottom2 = bottom - inset
+
+        inner_points = []
+        for i in range(11):
+            t = i / 10
+            px = left2 + (cx2 - left2) * t
+            py = top2 + 14 * (t * (1 - t)) * (-3)
+            inner_points.append((px, py))
+        for i in range(11):
+            t = i / 10
+            px = cx2 + (right2 - cx2) * t
+            py = top2 + 14 * (t * (1 - t)) * (-3)
+            inner_points.append((px, py))
+        for i in range(11):
+            t = i / 10
+            px = right2 - 4 * (1 - (2 * t - 1) ** 2)
+            py = top2 + (bottom2 - top2) * 0.55 * t
+            inner_points.append((px, py))
+        for i in range(11):
+            t = i / 10
+            px = right2 - (right2 - cx2) * t
+            py = top2 + (bottom2 - top2) * 0.55 + (bottom2 - (top2 + (bottom2 - top2) * 0.55)) * t
+            inner_points.append((px, py))
+        for i in range(11):
+            t = i / 10
+            px = cx2 - (cx2 - left2) * t
+            py = bottom2 - (bottom2 - (top2 + (bottom2 - top2) * 0.55)) * t
+            inner_points.append((px, py))
+        for i in range(11):
+            t = i / 10
+            px = left2 + 4 * (1 - (2 * t - 1) ** 2)
+            py = top2 + (bottom2 - top2) * 0.55 * (1 - t)
+            inner_points.append((px, py))
+
+        pygame.draw.polygon(surface, shield_colour_border, inner_points, width=2)
 
     # Token background oval
     token_rect = pygame.Rect(x, y, token_width, token_height)
@@ -516,17 +608,17 @@ def main():
                         selected_card = None
                         is_in_combat = False
 
-                    elif end_turn_button_rect.collidepoint(mouse_position):
+                    if end_turn_button_rect.collidepoint(mouse_position):
+
                         if game_state.is_player_turn() and not is_in_combat:
                             selected_card = None
                             game_state.end_player_turn()
                             game_state.boss.take_turn(game_state.boss_board)
                             game_state.save_board_snapshot()
+                            # Build animation states BEFORE combat queue so health values are pre-combat
+                            player_animation_states = build_animation_states(game_state.player_board, PLAYER_BOARD_Y)
+                            boss_animation_states = build_animation_states(game_state.boss_board, BOSS_BOARD_Y)
                             combat_event_queue = build_combat_event_queue(game_state)
-                            player_animation_states = build_animation_states(
-                                game_state.player_board, PLAYER_BOARD_Y)
-                            boss_animation_states = build_animation_states(
-                                game_state.boss_board, BOSS_BOARD_Y)
                             last_combat_event_time = current_time
                             is_in_combat = True
 
