@@ -1008,10 +1008,12 @@ def main():
 
                             for state in player_animation_states + boss_animation_states:
                                 if state.unit is attacker:
-                                    state.pending_display_health = attacker.health
+                                    state.display_health = combat_event["attacker_health_before"]
+                                    state.pending_display_health = combat_event["attacker_health_after"]
                                     state.damage_applied = False
                                 elif state.unit is target:
-                                    state.pending_display_health = target.health
+                                    state.display_health = combat_event["target_health_before"]
+                                    state.pending_display_health = combat_event["target_health_after"]
                                     state.damage_applied = False
 
                             trigger_attack_animation(

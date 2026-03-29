@@ -115,12 +115,23 @@ def build_combat_event_queue(game_state) -> list[dict]:
 
 def resolve_attack_on_copies(attacker_copy: Unit, target_copy: Unit,
                              attacker_original: Unit, target_original: Unit) -> list[dict]:
-    """Resolves an attack on copy units for calculation purposes.
-    Events reference the original units so the UI can find and animate them."""
+    """Resolves an attack on copy units for calculation purposes."""
     events = []
 
     attacker_damage = attacker_copy.attack
     target_damage = target_copy.attack
+
+    # Capture health BEFORE damage is applied
+    attacker_health_before = attacker_copy.health
+    target_health_before = target_copy.health
+
+    # Apply damage to copies only
+    target_copy.take_damage(attacker_damage)
+    attacker_copy.take_damage(target_damage)
+
+    # Capture health AFTER damage is applied
+    attacker_health_after = attacker_copy.health
+    target_health_after = target_copy.health
 
     events.append({
         "type": "attack",
@@ -128,9 +139,13 @@ def resolve_attack_on_copies(attacker_copy: Unit, target_copy: Unit,
         "target": target_original,
         "damage_to_target": attacker_damage,
         "damage_to_attacker": target_damage,
+        "attacker_health_before": attacker_health_before,
+        "attacker_health_after": attacker_health_after,
+        "target_health_before": target_health_before,
+        "target_health_after": target_health_after,
     })
 
-    if target_copy.health - attacker_damage <= 0:
+    if target_copy.health <= 0:
         events.append({
             "type": "unit_will_die",
             "unit": target_original,
@@ -138,16 +153,12 @@ def resolve_attack_on_copies(attacker_copy: Unit, target_copy: Unit,
             "damage_to_attacker": target_damage,
         })
 
-    if attacker_copy.health - target_damage <= 0:
+    if attacker_copy.health <= 0:
         events.append({
             "type": "unit_will_die",
             "unit": attacker_original,
             "damage_to_target": attacker_damage,
             "damage_to_attacker": target_damage,
         })
-
-    # Mutate only the copies
-    target_copy.take_damage(attacker_damage)
-    attacker_copy.take_damage(target_damage)
 
     return events
