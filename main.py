@@ -5,13 +5,18 @@ from hand import Hand
 from game_state import GameState
 from combat import build_combat_event_queue
 from boss import Boss
+import copy
 
 # --- Constants ---
 SCREEN_WIDTH = 1200
 SCREEN_HEIGHT = 720
 FPS = 60
 BACKGROUND_COLOUR = (30, 30, 40)
-COMBAT_EVENT_DELAY_MILLISECONDS = 600
+
+# --- Combat ---
+COMBAT_SLIDE_DISTANCE = 999
+COMBAT_SLIDE_DURATION_MILLISECONDS = 500
+COMBAT_EVENT_DELAY_MILLISECONDS = 800
 
 # --- Card Dimensions ---
 CARD_WIDTH = 140
@@ -39,9 +44,10 @@ COLOUR_CARD_SELECTED = (255, 255, 100)
 COLOUR_CARD_UNAFFORDABLE = (120, 60, 60)
 
 
-def draw_unit_card(surface: pygame.Surface, unit: Unit, x: int, y: int, is_selected: bool = False,
-                   is_affordable: bool = True):
-    """Draws a unit card at the given position with optional selection and affordability highlights."""
+def draw_unit_card(surface: pygame.Surface, unit: Unit, x: int, y: int,
+                   is_selected: bool = False, is_affordable: bool = True,
+                   display_health: int = None):
+    """Draws a unit card at the given position."""
     background_colour = (60, 60, 80)
     if is_selected:
         border_colour = COLOUR_CARD_SELECTED
@@ -81,9 +87,10 @@ def draw_unit_card(surface: pygame.Surface, unit: Unit, x: int, y: int, is_selec
     draw_stat_circle(surface, unit.attack, x + 14, y + CARD_HEIGHT - 14, (180, 140, 20), COLOUR_STAT_ATTACK,
                      font_stats_text)
 
-    # Health (bottom right)
-    draw_stat_circle(surface, unit.health, x + CARD_WIDTH - 14, y + CARD_HEIGHT - 14, (160, 30, 30), COLOUR_STAT_HEALTH,
-                     font_stats_text)
+    # Health (bottom right) - use display_health if provided
+    shown_health = display_health if display_health is not None else unit.health
+    draw_stat_circle(surface, shown_health, x + CARD_WIDTH - 14, y + CARD_HEIGHT - 14,
+                     (160, 30, 30), COLOUR_STAT_HEALTH, font_stats_text)
 
 
 def draw_stat_circle(surface: pygame.Surface, value: int, center_x: int, center_y: int, fill_colour: tuple,
@@ -114,31 +121,45 @@ def draw_hand(surface: pygame.Surface, hand: Hand, selected_card: Unit, current_
     return card_rects
 
 
-def draw_player_board(surface: pygame.Surface, board: list) -> list[tuple]:
-    """Draws all units on the player board and returns a list of (card, rect)."""
+def draw_player_board(surface: pygame.Surface, board: list,
+                      animation_states: list = None) -> list[tuple]:
+    """Draws all units on the player board using animation positions if available."""
     total_board_width = len(board) * CARD_WIDTH + (len(board) - 1) * CARD_SPACING
     start_x = (SCREEN_WIDTH - total_board_width) // 2
     card_rects = []
 
     for index, unit in enumerate(board):
-        card_x = start_x + index * (CARD_WIDTH + CARD_SPACING)
-        card_y = PLAYER_BOARD_Y + (BOARD_ZONE_HEIGHT - CARD_HEIGHT) // 2
-        draw_unit_card(surface, unit, card_x, card_y)
+        state = None
+        if animation_states:
+            state = next((s for s in animation_states if s.unit is unit), None)
+
+        card_x = state.current_x if state else start_x + index * (CARD_WIDTH + CARD_SPACING)
+        card_y = state.current_y if state else PLAYER_BOARD_Y + (BOARD_ZONE_HEIGHT - CARD_HEIGHT) // 2
+        display_health = state.display_health if state else None
+
+        draw_unit_card(surface, unit, card_x, card_y, display_health=display_health)
         card_rects.append((unit, pygame.Rect(card_x, card_y, CARD_WIDTH, CARD_HEIGHT)))
 
     return card_rects
 
 
-def draw_boss_board(surface: pygame.Surface, board: list) -> list[tuple]:
-    """Draws all units on the boss board and returns a list of (unit, rect)."""
+def draw_boss_board(surface: pygame.Surface, board: list,
+                    animation_states: list = None) -> list[tuple]:
+    """Draws all units on the boss board using animation positions if available."""
     total_board_width = len(board) * CARD_WIDTH + (len(board) - 1) * CARD_SPACING
     start_x = (SCREEN_WIDTH - total_board_width) // 2
     card_rects = []
 
     for index, unit in enumerate(board):
-        card_x = start_x + index * (CARD_WIDTH + CARD_SPACING)
-        card_y = BOSS_BOARD_Y + (BOARD_ZONE_HEIGHT - CARD_HEIGHT) // 2
-        draw_unit_card(surface, unit, card_x, card_y)
+        state = None  # ← always initialise to None first
+        if animation_states:
+            state = next((s for s in animation_states if s.unit is unit), None)
+
+        card_x = state.current_x if state else start_x + index * (CARD_WIDTH + CARD_SPACING)
+        card_y = state.current_y if state else BOSS_BOARD_Y + (BOARD_ZONE_HEIGHT - CARD_HEIGHT) // 2
+        display_health = state.display_health if state else None
+
+        draw_unit_card(surface, unit, card_x, card_y, display_health=display_health)
         card_rects.append((unit, pygame.Rect(card_x, card_y, CARD_WIDTH, CARD_HEIGHT)))
 
     return card_rects
@@ -238,6 +259,89 @@ def get_player_board_zone_rect() -> pygame.Rect:
     return pygame.Rect(60, PLAYER_BOARD_Y, SCREEN_WIDTH - 140, BOARD_ZONE_HEIGHT)
 
 
+class UnitAnimationState:
+    def __init__(self, unit: Unit, base_x: int, base_y: int):
+        self.unit = unit
+        self.base_x = base_x
+        self.base_y = base_y
+        self.current_x = base_x
+        self.current_y = base_y
+        self.is_animating = False
+        self.animation_start_time = 0
+        self.animation_direction_x = 0
+        self.animation_direction_y = 0
+        self.slide_distance = 0
+        self.damage_applied = False
+        self.display_health = unit.health  # ← shown before collision
+        self.pending_display_health = unit.health  # ← shown after collision
+
+
+def build_animation_states(board: list, board_y: int) -> list[UnitAnimationState]:
+    """Builds a list of UnitAnimationState objects for each unit on a board."""
+    total_board_width = len(board) * CARD_WIDTH + (len(board) - 1) * CARD_SPACING
+    start_x = (SCREEN_WIDTH - total_board_width) // 2
+    animation_states = []
+
+    for index, unit in enumerate(board):
+        card_x = start_x + index * (CARD_WIDTH + CARD_SPACING)
+        card_y = board_y + (BOARD_ZONE_HEIGHT - CARD_HEIGHT) // 2
+        animation_states.append(UnitAnimationState(unit, card_x, card_y))
+
+    return animation_states
+
+
+def update_animation_states(animation_states: list[UnitAnimationState],
+                            pending_damage_map: dict, current_time: int):
+    """Updates all unit animation positions and reveals damage at collision point."""
+    for animation_state in animation_states:
+        if not animation_state.is_animating:
+            continue
+
+        elapsed = current_time - animation_state.animation_start_time
+        progress = min(elapsed / COMBAT_SLIDE_DURATION_MILLISECONDS, 1.0)
+
+        if progress < 0.5:
+            slide_amount = progress * 2 * animation_state.slide_distance
+        else:
+            slide_amount = (1.0 - progress) * 2 * animation_state.slide_distance
+
+        animation_state.current_x = animation_state.base_x + int(
+            animation_state.animation_direction_x * slide_amount)
+        animation_state.current_y = animation_state.base_y + int(
+            animation_state.animation_direction_y * slide_amount)
+
+        # Reveal post-damage health at the collision midpoint
+        if progress >= 0.5 and not animation_state.damage_applied:
+            animation_state.display_health = animation_state.pending_display_health
+            animation_state.damage_applied = True
+
+        if progress >= 1.0:
+            animation_state.current_x = animation_state.base_x
+            animation_state.current_y = animation_state.base_y
+            animation_state.is_animating = False
+
+
+def trigger_attack_animation(animation_states: list[UnitAnimationState], attacking_unit: Unit,
+                             target_unit: Unit, target_states: list[UnitAnimationState],
+                             start_time: int):
+    """Triggers a slide animation for the attacker toward the target card position."""
+    attacker_state = next((state for state in animation_states if state.unit is attacking_unit), None)
+    target_state = next((state for state in target_states if state.unit is target_unit), None)
+
+    if attacker_state is None or target_state is None:
+        return
+
+    direction_x = target_state.base_x - attacker_state.base_x
+    direction_y = target_state.base_y - attacker_state.base_y
+    distance = max(1, (direction_x ** 2 + direction_y ** 2) ** 0.5)
+
+    attacker_state.animation_direction_x = direction_x / distance
+    attacker_state.animation_direction_y = direction_y / distance
+    attacker_state.slide_distance = distance  # travel the full distance to the target
+    attacker_state.is_animating = True
+    attacker_state.animation_start_time = start_time
+
+
 def main():
     pygame.init()
     screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
@@ -252,6 +356,11 @@ def main():
     combat_event_queue = []
     last_combat_event_time = 0
     is_in_combat = False
+    is_waiting_for_animation = False
+    pending_damage_map = {}
+
+    player_animation_states = []
+    boss_animation_states = []
 
     running = True
     while running:
@@ -275,6 +384,8 @@ def main():
                         game_state.boss.take_turn(game_state.boss_board)
                         game_state.save_board_snapshot()
                         combat_event_queue = build_combat_event_queue(game_state)
+                        player_animation_states = build_animation_states(game_state.player_board, PLAYER_BOARD_Y)
+                        boss_animation_states = build_animation_states(game_state.boss_board, BOSS_BOARD_Y)
                         last_combat_event_time = current_time
                         is_in_combat = True
 
@@ -297,22 +408,74 @@ def main():
                             if success:
                                 selected_card = None
 
-        # Process one combat event per tick based on delay timer
-        if is_in_combat and current_time - last_combat_event_time >= COMBAT_EVENT_DELAY_MILLISECONDS:
-            if combat_event_queue:
-                combat_event = combat_event_queue.pop(0)
+        # Wait for current animation to finish before processing next event
+        any_animation_active = any(state.is_animating for state in player_animation_states + boss_animation_states)
 
-                if combat_event["type"] == "combat_end":
-                    game_state.restore_boards_from_snapshot()
-                    is_in_combat = False
-                    game_state.begin_player_turn()
+        if is_in_combat and not any_animation_active:
+            if current_time - last_combat_event_time >= COMBAT_EVENT_DELAY_MILLISECONDS:
+                if combat_event_queue:
+                    combat_event = combat_event_queue.pop(0)
 
-                last_combat_event_time = current_time
+                    if combat_event["type"] == "attack":
+                        attacker = combat_event["attacker"]
+                        target = combat_event["target"]
+
+                        pending_damage_map = {
+                            attacker: {"damage_received": combat_event["damage_to_attacker"]},
+                            target: {"damage_received": combat_event["damage_to_target"]},
+                        }
+
+                        # Set pending display health so stats update visually at collision
+                        for state in player_animation_states + boss_animation_states:
+                            if state.unit is attacker:
+                                state.pending_display_health = attacker.health  # already reduced by combat.py
+                                state.damage_applied = False
+                            if state.unit is target:
+                                state.pending_display_health = target.health  # already reduced by combat.py
+                                state.damage_applied = False
+
+                        trigger_attack_animation(
+                            player_animation_states, attacker, target,
+                            boss_animation_states, current_time
+                        )
+                        trigger_attack_animation(
+                            boss_animation_states, attacker, target,
+                            player_animation_states, current_time
+                        )
+
+                        # Reset damage_applied flag for units involved
+                        for state in player_animation_states + boss_animation_states:
+                            if state.unit is attacker or state.unit is target:
+                                state.damage_applied = False
+
+
+                    elif combat_event["type"] == "unit_will_die":
+                        dead_unit = combat_event["unit"]
+                        # Sync display health before removal so it shows 0 briefly
+                        for state in player_animation_states + boss_animation_states:
+                            if state.unit is dead_unit:
+                                state.display_health = 0
+                        game_state.player_board = [u for u in game_state.player_board if u is not dead_unit]
+                        game_state.boss_board = [u for u in game_state.boss_board if u is not dead_unit]
+                        player_animation_states = [s for s in player_animation_states if s.unit is not dead_unit]
+                        boss_animation_states = [s for s in boss_animation_states if s.unit is not dead_unit]
+
+                    elif combat_event["type"] == "combat_end":
+                        game_state.restore_boards_from_snapshot()
+                        player_animation_states = []
+                        boss_animation_states = []
+                        is_in_combat = False
+                        game_state.begin_player_turn()
+
+                    last_combat_event_time = current_time
+
+        update_animation_states(player_animation_states, pending_damage_map, current_time)
+        update_animation_states(boss_animation_states, pending_damage_map, current_time)
 
         screen.fill(BACKGROUND_COLOUR)
         draw_board_zones(screen)
-        draw_boss_board(screen, game_state.boss_board)
-        draw_player_board(screen, game_state.player_board)
+        draw_boss_board(screen, game_state.boss_board, boss_animation_states)
+        draw_player_board(screen, game_state.player_board, player_animation_states)
         hand_card_rects = draw_hand(screen, game_state.player_hand, selected_card, game_state.current_mana)
         draw_mana_bar(screen, game_state.current_mana, game_state.maximum_mana)
         draw_health(screen, game_state.player_health, "Your Health", 20, PLAYER_BOARD_Y - 52, COLOUR_HEALTH_PLAYER)
