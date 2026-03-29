@@ -21,6 +21,9 @@ DAMAGE_POPUP_DURATION_MILLISECONDS = 1500
 CARD_WIDTH = 140
 CARD_HEIGHT = 200
 CARD_SPACING = 20
+CARD_ZOOM_SCALE = 1.6
+CARD_ZOOM_WIDTH = int(CARD_WIDTH * CARD_ZOOM_SCALE)
+CARD_ZOOM_HEIGHT = int(CARD_HEIGHT * CARD_ZOOM_SCALE)
 
 # --- Board Layout ---
 BOARD_CENTRE_Y = SCREEN_HEIGHT // 2
@@ -96,6 +99,70 @@ def draw_unit_card(surface: pygame.Surface, unit: Unit, x: int, y: int,
                      (160, 30, 30), COLOUR_STAT_HEALTH, font_stats_text)
 
 
+def draw_unit_card_zoomed(surface: pygame.Surface, unit: Unit, x: int, y: int):
+    """Draws an enlarged version of a unit card for hover zoom effect."""
+    width = CARD_ZOOM_WIDTH
+    height = CARD_ZOOM_HEIGHT
+    scale = CARD_ZOOM_SCALE
+
+    background_colour = (60, 60, 80)
+    border_colour = (220, 220, 240)
+    border_width = 3
+
+    pygame.draw.rect(surface, background_colour, (x, y, width, height), border_radius=10)
+    pygame.draw.rect(surface, border_colour, (x, y, width, height), width=border_width, border_radius=10)
+
+    font_name_text = pygame.font.SysFont(None, int(19 * scale))
+    font_stats_text = pygame.font.SysFont(None, int(24 * scale))
+
+    # Art placeholder
+    art_padding = int(8 * scale)
+    art_height = int(90 * scale)
+    pygame.draw.rect(surface, (100, 100, 120),
+                     (x + art_padding, y + int(24 * scale),
+                      width - art_padding * 2, art_height))
+
+    # Name banner
+    name_banner_y = y + int(24 * scale) + art_height + int(4 * scale)
+    pygame.draw.rect(surface, (40, 40, 60),
+                     (x + int(4 * scale), name_banner_y,
+                      width - int(8 * scale), int(22 * scale)))
+
+    name_surface = font_name_text.render(unit.name, True, COLOUR_TEXT_DEFAULT)
+    name_x = x + (width - name_surface.get_width()) // 2
+    surface.blit(name_surface, (name_x, name_banner_y + int(3 * scale)))
+
+    # Mana cost (top left)
+    mana_circle_x = x + int(14 * scale)
+    mana_circle_y = y + int(14 * scale)
+    mana_radius = int(12 * scale)
+    pygame.draw.circle(surface, COLOUR_MANA_FILL, (mana_circle_x, mana_circle_y), mana_radius)
+    pygame.draw.circle(surface, COLOUR_STAT_MANA, (mana_circle_x, mana_circle_y), mana_radius, width=2)
+    mana_surface = font_stats_text.render(str(unit.mana_cost), True, COLOUR_TEXT_DEFAULT)
+    surface.blit(mana_surface, (mana_circle_x - mana_surface.get_width() // 2,
+                                mana_circle_y - mana_surface.get_height() // 2))
+
+    # Attack (bottom left)
+    attack_circle_x = x + int(14 * scale)
+    attack_circle_y = y + height - int(14 * scale)
+    attack_radius = int(12 * scale)
+    pygame.draw.circle(surface, (180, 140, 20), (attack_circle_x, attack_circle_y), attack_radius)
+    pygame.draw.circle(surface, COLOUR_STAT_ATTACK, (attack_circle_x, attack_circle_y), attack_radius, width=2)
+    attack_surface = font_stats_text.render(str(unit.attack), True, COLOUR_TEXT_DEFAULT)
+    surface.blit(attack_surface, (attack_circle_x - attack_surface.get_width() // 2,
+                                  attack_circle_y - attack_surface.get_height() // 2))
+
+    # Health (bottom right)
+    health_circle_x = x + width - int(14 * scale)
+    health_circle_y = y + height - int(14 * scale)
+    health_radius = int(12 * scale)
+    pygame.draw.circle(surface, (160, 30, 30), (health_circle_x, health_circle_y), health_radius)
+    pygame.draw.circle(surface, COLOUR_STAT_HEALTH, (health_circle_x, health_circle_y), health_radius, width=2)
+    health_surface = font_stats_text.render(str(unit.health), True, COLOUR_TEXT_DEFAULT)
+    surface.blit(health_surface, (health_circle_x - health_surface.get_width() // 2,
+                                  health_circle_y - health_surface.get_height() // 2))
+
+
 def draw_stat_circle(surface: pygame.Surface, value: int, center_x: int, center_y: int, fill_colour: tuple,
                      border_colour: tuple, font: pygame.font.Font):
     """Draws a filled circle with a number inside, used for card stats."""
@@ -108,30 +175,42 @@ def draw_stat_circle(surface: pygame.Surface, value: int, center_x: int, center_
 
 
 def draw_hand(surface: pygame.Surface, hand: Hand, selected_card: Unit,
-              current_mana: int, mouse_position: tuple = (0, 0)) -> list[tuple]:
-    """Draws all cards in the hand. Cards peek from the bottom and rise on hover."""
+              current_mana: int, mouse_position: tuple = (0, 0)) -> tuple[list, tuple | None]:
+    """Draws all cards in the hand. Returns card rects and the hovered card zoom info."""
     total_hand_width = len(hand.cards) * CARD_WIDTH + (len(hand.cards) - 1) * CARD_SPACING
     start_x = (SCREEN_WIDTH - total_hand_width) // 2
     card_rects = []
+    hovered_zoom_info = None
 
     for index, card in enumerate(hand.cards):
         card_x = start_x + index * (CARD_WIDTH + CARD_SPACING)
 
-        # Check if this card is being hovered
         peek_rect = pygame.Rect(card_x, HAND_Y_POSITION, CARD_WIDTH, CARD_HEIGHT)
         is_hovered = peek_rect.collidepoint(mouse_position)
         is_selected = card is selected_card
 
-        # Selected cards also rise fully
         card_y = HAND_Y_POSITION_HOVERED if (is_hovered or is_selected) else HAND_Y_POSITION
 
         is_affordable = current_mana >= card.mana_cost
         if isinstance(card, Unit):
             draw_unit_card(surface, card, card_x, card_y,
                            is_selected=is_selected, is_affordable=is_affordable)
+            # Dim the original card when hovered so zoom is the focus
+            if is_hovered and not is_selected:
+                dim_surface = pygame.Surface((CARD_WIDTH, CARD_HEIGHT), pygame.SRCALPHA)
+                dim_surface.fill((0, 0, 0, 160))
+                surface.blit(dim_surface, (card_x, card_y))
+
         card_rects.append((card, pygame.Rect(card_x, card_y, CARD_WIDTH, CARD_HEIGHT)))
 
-    return card_rects
+        # Track hovered card for zoom — only zoom when fully raised
+        if is_hovered and not is_selected and isinstance(card, Unit):
+            zoom_x = card_x + (CARD_WIDTH - CARD_ZOOM_WIDTH) // 2
+            zoom_x = max(10, min(zoom_x, SCREEN_WIDTH - CARD_ZOOM_WIDTH - 10))
+            zoom_y = HAND_Y_POSITION_HOVERED - CARD_ZOOM_HEIGHT + 20
+            hovered_zoom_info = (card, zoom_x, zoom_y)
+
+    return card_rects, hovered_zoom_info
 
 
 def draw_player_board(surface: pygame.Surface, board: list,
@@ -209,7 +288,7 @@ def draw_player_mana_bar(surface: pygame.Surface, current_mana: int, maximum_man
     gem_spacing = 6
     gems_per_column = 5
 
-    bar_x_start = SCREEN_WIDTH // 2 + 80
+    bar_x_start = SCREEN_WIDTH // 2 + 100
     bar_y_start = PLAYER_PORTRAIT_Y + 10
 
     for index in range(maximum_mana):
@@ -1018,6 +1097,7 @@ def main():
         elif current_scene == "settings":
             draw_settings_menu(screen, SCREEN_WIDTH, SCREEN_HEIGHT, mouse_position, game_settings)
 
+
         elif current_scene == "game" and game_state is not None:
             draw_game_board_background(screen)
             draw_boss_hand(screen, game_state.boss_hand_size)
@@ -1036,16 +1116,20 @@ def main():
                 screen, name="Hero", health=game_state.player_health,
                 centre_x=SCREEN_WIDTH // 2, top_y=PLAYER_PORTRAIT_Y, is_player=True)
 
-            hand_card_rects = draw_hand(
-                screen, game_state.player_hand, selected_card,
-                game_state.current_mana, mouse_position)
-
             draw_player_mana_bar(screen, game_state.current_mana, game_state.maximum_mana)
             draw_boss_mana_bar(screen, game_state.boss_current_mana, game_state.boss_maximum_mana)
             end_turn_button_rect = draw_end_turn_button(
                 screen, game_state.is_player_turn() and not is_in_combat)
             menu_button_rect = draw_menu_button(screen, mouse_position)
             draw_damage_popup(screen, round_damage_popup, current_time)
+
+            # Hand and zoom drawn LAST so they appear over everything
+            hand_card_rects, hovered_zoom_info = draw_hand(
+                screen, game_state.player_hand, selected_card,
+                game_state.current_mana, mouse_position)
+            if hovered_zoom_info is not None:
+                hovered_card, zoom_x, zoom_y = hovered_zoom_info
+                draw_unit_card_zoomed(screen, hovered_card, zoom_x, zoom_y)
 
         pygame.display.flip()
         clock.tick(FPS)
