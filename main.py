@@ -584,22 +584,64 @@ def apply_new_resolution(new_width: int, new_height: int, screen: pygame.Surface
     return new_screen
 
 
-def draw_end_turn_button(surface: pygame.Surface, is_player_turn: bool) -> pygame.Rect:
-    """Draws the End Turn button and returns its rect for click detection."""
-    button_width = 140
-    button_height = 50
+def draw_end_turn_button(surface: pygame.Surface, is_player_turn: bool,
+                         mouse_position: tuple = (0, 0)) -> pygame.Rect:
+    """Draws the Start Combat button with hover and active states."""
+    button_width = 160
+    button_height = 56
     button_x = SCREEN_WIDTH - button_width - 20
     button_y = SCREEN_HEIGHT // 2 - button_height // 2
 
-    colour = COLOUR_BUTTON_ACTIVE if is_player_turn else COLOUR_BUTTON_INACTIVE
     button_rect = pygame.Rect(button_x, button_y, button_width, button_height)
-    pygame.draw.rect(surface, colour, button_rect, border_radius=8)
-    pygame.draw.rect(surface, COLOUR_TEXT_DEFAULT, button_rect, width=2, border_radius=8)
+    is_hovered = button_rect.collidepoint(mouse_position) and is_player_turn
+
+    if not is_player_turn:
+        background_colour = (40, 40, 50)
+        border_colour = (70, 70, 80)
+        text_colour = (80, 80, 90)
+        label = "In Combat..."
+    elif is_hovered:
+        background_colour = (80, 180, 80)
+        border_colour = (140, 255, 140)
+        text_colour = (255, 255, 255)
+        label = "Start Combat"
+    else:
+        background_colour = (50, 140, 50)
+        border_colour = (80, 200, 80)
+        text_colour = (220, 255, 220)
+        label = "Start Combat"
+
+    # Button shadow
+    shadow_rect = pygame.Rect(button_x + 3, button_y + 3, button_width, button_height)
+    pygame.draw.rect(surface, (15, 15, 20), shadow_rect, border_radius=10)
+
+    # Button body
+    pygame.draw.rect(surface, background_colour, button_rect, border_radius=10)
+
+    # Top highlight for depth
+    if is_player_turn:
+        highlight_rect = pygame.Rect(button_x + 2, button_y + 2, button_width - 4, button_height // 2)
+        highlight_colour = (min(background_colour[0] + 30, 255),
+                            min(background_colour[1] + 30, 255),
+                            min(background_colour[2] + 30, 255))
+        pygame.draw.rect(surface, highlight_colour, highlight_rect,
+                         border_top_left_radius=9, border_top_right_radius=9)
+
+    # Border
+    pygame.draw.rect(surface, border_colour, button_rect, width=2, border_radius=10)
+
+    # Sword icon to the left of text
+    icon_x = button_x + 18
+    icon_y = button_y + button_height // 2
+    if is_player_turn:
+        pygame.draw.line(surface, text_colour, (icon_x - 6, icon_y - 8),
+                         (icon_x + 6, icon_y + 8), 2)
+        pygame.draw.line(surface, text_colour, (icon_x - 4, icon_y - 6),
+                         (icon_x - 8, icon_y - 2), 2)
 
     font = pygame.font.SysFont(None, 26)
-    label = "End Turn" if is_player_turn else "Boss Turn..."
-    label_surface = font.render(label, True, COLOUR_TEXT_DEFAULT)
-    label_x = button_x + (button_width - label_surface.get_width()) // 2
+    label_surface = font.render(label, True, text_colour)
+    label_x = button_x + (button_width - label_surface.get_width()) // 2 + 8
     label_y = button_y + (button_height - label_surface.get_height()) // 2
     surface.blit(label_surface, (label_x, label_y))
 
@@ -1188,7 +1230,7 @@ def main():
             draw_player_mana_bar(screen, game_state.current_mana, game_state.maximum_mana)
             draw_boss_mana_bar(screen, game_state.boss_current_mana, game_state.boss_maximum_mana)
             end_turn_button_rect = draw_end_turn_button(
-                screen, game_state.is_player_turn() and not is_in_combat)
+                screen, game_state.is_player_turn() and not is_in_combat, mouse_position)
             menu_button_rect = draw_menu_button(screen, mouse_position)
             draw_damage_popup(screen, round_damage_popup, current_time)
 
