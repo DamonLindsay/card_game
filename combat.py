@@ -1,4 +1,5 @@
 import random
+import copy
 from card import Unit
 
 
@@ -81,26 +82,38 @@ def determine_first_attacker(player_board: list[Unit], boss_board: list[Unit]) -
 
 def build_combat_event_queue(game_state) -> list[dict]:
     """Pre-calculates the full alternating combat sequence and returns it as a list of events.
-    Attacks alternate between sides, with the side that has more units going first.
-    Excess attackers deal damage directly to the opposing hero."""
+    Works on copies of units so original unit health values are never mutated."""
     events = []
 
-    player_board = list(game_state.player_board)
-    boss_board = list(game_state.boss_board)
+    # Work on copies so originals are untouched
+    player_originals = list(game_state.player_board)
+    boss_originals = list(game_state.boss_board)
+    player_board = [copy.copy(unit) for unit in player_originals]
+    boss_board = [copy.copy(unit) for unit in boss_originals]
+
+    # Map copies back to originals so events reference the real units
+    copy_to_original = {}
+    for original, copied in zip(player_originals, player_board):
+        copy_to_original[id(copied)] = original
+    for original, copied in zip(boss_originals, boss_board):
+        copy_to_original[id(copied)] = original
 
     current_attacker_side = determine_first_attacker(player_board, boss_board)
-
     player_attack_index = 0
     boss_attack_index = 0
 
     while player_board and boss_board:
         if current_attacker_side == "player":
-            # Wrap attack index if it exceeds current board length
             player_attack_index = player_attack_index % len(player_board)
-            attacker = player_board[player_attack_index]
+            attacker_copy = player_board[player_attack_index]
             valid_targets = get_valid_targets(boss_board)
-            target = random.choice(valid_targets)
-            attack_events = resolve_attack(attacker, target)
+            target_copy = random.choice(valid_targets)
+
+            attacker_original = copy_to_original[id(attacker_copy)]
+            target_original = copy_to_original[id(target_copy)]
+
+            attack_events = resolve_attack_on_copies(
+                attacker_copy, target_copy, attacker_original, target_original)
             events.extend(attack_events)
             player_board = remove_dead_units(player_board)
             boss_board = remove_dead_units(boss_board)
@@ -108,23 +121,84 @@ def build_combat_event_queue(game_state) -> list[dict]:
             current_attacker_side = "boss"
         else:
             boss_attack_index = boss_attack_index % len(boss_board)
-            attacker = boss_board[boss_attack_index]
+            attacker_copy = boss_board[boss_attack_index]
             valid_targets = get_valid_targets(player_board)
-            target = random.choice(valid_targets)
-            attack_events = resolve_attack(attacker, target)
+            target_copy = random.choice(valid_targets)
+
+            attacker_original = copy_to_original[id(attacker_copy)]
+            target_original = copy_to_original[id(target_copy)]
+
+            attack_events = resolve_attack_on_copies(
+                attacker_copy, target_copy, attacker_original, target_original)
             events.extend(attack_events)
             player_board = remove_dead_units(player_board)
             boss_board = remove_dead_units(boss_board)
             boss_attack_index += 1
             current_attacker_side = "player"
 
-    # Any remaining player units deal damage directly to the boss
-    for remaining_attacker in player_board:
-        events.extend(resolve_excess_damage_to_boss(remaining_attacker, game_state))
+    surviving_player_originals = [copy_to_original[id(u)] for u in player_board if u.is_alive()]
+    surviving_boss_originals = [copy_to_original[id(u)] for u in boss_board if u.is_alive()]
 
-    # Any remaining boss units deal damage directly to the player
-    for remaining_attacker in boss_board:
-        events.extend(resolve_excess_damage_to_player(remaining_attacker, game_state))
+    for unit in surviving_player_originals:
+        events.append({
+            "type": "hero_hit",
+            "attacker": unit,
+            "target": "boss",
+            "damage": unit.mana_cost,
+        })
 
-    events.append({"type": "combat_end"})
+    for unit in surviving_boss_originals:
+        events.append({
+            "type": "hero_hit",
+            "attacker": unit,
+            "target": "player",
+            "damage": unit.mana_cost,
+        })
+
+    events.append({
+        "type": "combat_end",
+        "surviving_player_units": surviving_player_originals,
+        "surviving_boss_units": surviving_boss_originals,
+    })
+
+    return events
+
+
+def resolve_attack_on_copies(attacker_copy: Unit, target_copy: Unit,
+                             attacker_original: Unit, target_original: Unit) -> list[dict]:
+    """Resolves an attack on copy units for calculation purposes.
+    Events reference the original units so the UI can find and animate them."""
+    events = []
+
+    attacker_damage = attacker_copy.attack
+    target_damage = target_copy.attack
+
+    events.append({
+        "type": "attack",
+        "attacker": attacker_original,
+        "target": target_original,
+        "damage_to_target": attacker_damage,
+        "damage_to_attacker": target_damage,
+    })
+
+    if target_copy.health - attacker_damage <= 0:
+        events.append({
+            "type": "unit_will_die",
+            "unit": target_original,
+            "damage_to_target": attacker_damage,
+            "damage_to_attacker": target_damage,
+        })
+
+    if attacker_copy.health - target_damage <= 0:
+        events.append({
+            "type": "unit_will_die",
+            "unit": attacker_original,
+            "damage_to_target": attacker_damage,
+            "damage_to_attacker": target_damage,
+        })
+
+    # Mutate only the copies
+    target_copy.take_damage(attacker_damage)
+    attacker_copy.take_damage(target_damage)
+
     return events

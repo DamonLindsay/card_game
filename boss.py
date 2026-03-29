@@ -11,16 +11,25 @@ class Boss:
         self.deck = deck
         self.health = self.STARTING_HEALTH
 
-    def take_turn(self, boss_board: list[Unit]) -> Unit | None:
-        """Plays one unit from the boss deck onto the board if space allows.
-        Returns the unit played, or None if the board is full or deck is empty."""
-        if len(boss_board) >= self.MAXIMUM_BOARD_SIZE:
-            return None
-        card = self.deck.draw()
-        if card is None:
-            return None
-        boss_board.append(card)
-        return card
+    def take_turn(self, boss_board: list, available_mana: int) -> list:
+        """Plays units from the boss deck onto the board based on available mana.
+        Returns a list of units played this turn."""
+        units_played = []
+        remaining_mana = available_mana
+
+        while len(boss_board) < self.MAXIMUM_BOARD_SIZE:
+            card = self.deck.draw()
+            if card is None:
+                break
+            if card.mana_cost > remaining_mana:
+                # Put the card back and stop
+                self.deck.add_card(card)
+                break
+            boss_board.append(card)
+            remaining_mana -= card.mana_cost
+            units_played.append(card)
+
+        return units_played
 
 
 def build_boss_deck() -> Deck:

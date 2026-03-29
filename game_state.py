@@ -26,6 +26,7 @@ class GameState:
         self.player_hand = Hand()
         self.player_board = []
         self.boss_board = []
+        self.previous_boss_board = []
 
         self.player_board_snapshot = []
         self.boss_board_snapshot = []
@@ -105,6 +106,16 @@ class GameState:
         self.boss_board_snapshot = [unit.copy() for unit in self.boss_board]
 
     def restore_boards_from_snapshot(self):
-        """Restores both boards to their pre-combat state after combat ends."""
+        """Restores both boards to their pre-combat state and saves the boss board for display."""
+        self.previous_boss_board = [unit.copy() for unit in self.boss_board_snapshot]
         self.player_board = self.player_board_snapshot
-        self.boss_board = self.boss_board_snapshot
+        self.boss_board = []
+
+    def apply_combat_damage(self, surviving_player_units: list, surviving_boss_units: list) -> list[dict]:
+        """Deducts health from the losing side based on surviving enemy unit mana costs."""
+        if surviving_player_units and not surviving_boss_units:
+            for unit in surviving_player_units:
+                self.boss_health -= unit.mana_cost
+        elif surviving_boss_units and not surviving_player_units:
+            for unit in surviving_boss_units:
+                self.player_health -= unit.mana_cost

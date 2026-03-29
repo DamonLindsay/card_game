@@ -17,6 +17,7 @@ FPS = 60
 BACKGROUND_COLOUR = (30, 30, 40)
 COMBAT_EVENT_DELAY_MILLISECONDS = 800
 COMBAT_SLIDE_DURATION_MILLISECONDS = 500
+DAMAGE_POPUP_DURATION_MILLISECONDS = 1500
 
 # --- Card Dimensions ---
 CARD_WIDTH = 140
@@ -646,6 +647,16 @@ def draw_unit_token(surface: pygame.Surface, unit: Unit, x: int, y: int,
     health_y = health_circle_y - health_surface.get_height() // 2
     surface.blit(health_surface, (health_x, health_y))
 
+    # Mana cost (top left) — add this after the token borderline
+    font_mana = pygame.font.SysFont(None, 22)
+    mana_circle_x = x + 14
+    mana_circle_y = y + 14
+    pygame.draw.circle(surface, (30, 80, 200), (mana_circle_x, mana_circle_y), 10)
+    pygame.draw.circle(surface, (100, 150, 255), (mana_circle_x, mana_circle_y), 10, width=2)
+    mana_surface = font_mana.render(str(unit.mana_cost), True, COLOUR_TEXT_DEFAULT)
+    surface.blit(mana_surface, (mana_circle_x - mana_surface.get_width() // 2,
+                                mana_circle_y - mana_surface.get_height() // 2))
+
 
 def draw_hero_portrait(surface: pygame.Surface, name: str, health: int,
                        centre_x: int, top_y: int, is_player: bool = True):
@@ -697,33 +708,106 @@ def draw_hero_portrait(surface: pygame.Surface, name: str, health: int,
                                   health_circle_y - health_surface.get_height() // 2))
 
 
+def draw_damage_popup(surface: pygame.Surface, popup: dict, current_time: int):
+    """Draws a floating damage number after combat resolves."""
+    if popup is None:
+        return
+
+    elapsed = current_time - popup["start_time"]
+    if elapsed > DAMAGE_POPUP_DURATION_MILLISECONDS:
+        return
+
+    # Fade out over the last 500ms
+    alpha = 255
+    if elapsed > DAMAGE_POPUP_DURATION_MILLISECONDS - 500:
+        alpha = int(255 * (DAMAGE_POPUP_DURATION_MILLISECONDS - elapsed) / 500)
+
+    # Float upward over time
+    float_offset = int(elapsed / 4)
+
+    if popup["target"] == "boss":
+        base_x = SCREEN_WIDTH // 2
+        base_y = BOSS_PORTRAIT_Y + 80
+        colour = (255, 100, 100)
+    else:
+        base_x = SCREEN_WIDTH // 2
+        base_y = PLAYER_PORTRAIT_Y + 80
+        colour = (255, 100, 100)
+
+    font = pygame.font.SysFont(None, 64)
+    text = f"-{popup['amount']}"
+    text_surface = font.render(text, True, colour)
+    text_surface.set_alpha(alpha)
+    surface.blit(text_surface, (base_x - text_surface.get_width() // 2,
+                                base_y - float_offset))
+
+
+def trigger_hero_hit_animation(animation_states: list, attacking_unit: Unit,
+                               target: str, start_time: int):
+    """Triggers a slide animation for a unit attacking the hero portrait directly."""
+    attacker_state = next((s for s in animation_states if s.unit is attacking_unit), None)
+    if attacker_state is None:
+        return
+
+    if target == "boss":
+        target_x = SCREEN_WIDTH // 2
+        target_y = BOSS_PORTRAIT_Y + 60
+    else:
+        target_x = SCREEN_WIDTH // 2
+        target_y = PLAYER_PORTRAIT_Y + 60
+
+    direction_x = target_x - attacker_state.base_x
+    direction_y = target_y - attacker_state.base_y
+    distance = max(1, (direction_x ** 2 + direction_y ** 2) ** 0.5)
+
+    attacker_state.animation_direction_x = direction_x / distance
+    attacker_state.animation_direction_y = direction_y / distance
+    attacker_state.slide_distance = distance * 0.6
+    attacker_state.is_animating = True
+    attacker_state.animation_start_time = start_time
+    attacker_state.damage_applied = False
+    attacker_state.pending_display_health = attacking_unit.health
+
+
 def main():
     pygame.init()
 
-    # Launch in windowed fullscreen by default
     screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.NOFRAME)
     pygame.display.set_caption("Card Game")
     clock = pygame.time.Clock()
 
     current_scene = "menu"
 
+    # --- Game state ---
     game_state = None
     selected_card = None
     hand_card_rects = []
+
+    # --- Button rects ---
     end_turn_button_rect = pygame.Rect(0, 0, 0, 0)
+    menu_button_rect = pygame.Rect(0, 0, 0, 0)
+
+    # --- Combat state ---
     combat_event_queue = []
     last_combat_event_time = 0
     is_in_combat = False
     pending_damage_map = {}
     player_animation_states = []
     boss_animation_states = []
-    menu_button_rect = pygame.Rect(0, 0, 0, 0)
+
+    # --- Damage popups ---
+    round_damage_popup = None
+    damage_popup_queue = []
+    last_damage_popup_time = 0
 
     running = True
     while running:
         current_time = pygame.time.get_ticks()
         mouse_position = pygame.mouse.get_pos()
 
+        # =====================
+        # --- Event Handling ---
+        # =====================
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
@@ -736,6 +820,8 @@ def main():
                         current_scene = "menu"
 
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+
+                # --- Menu ---
                 if current_scene == "menu":
                     menu_rects = draw_main_menu(screen, SCREEN_WIDTH, SCREEN_HEIGHT, mouse_position)
                     if menu_rects["play"].collidepoint(mouse_position):
@@ -747,20 +833,20 @@ def main():
                         pending_damage_map = {}
                         player_animation_states = []
                         boss_animation_states = []
+                        round_damage_popup = None
+                        damage_popup_queue = []
                         current_scene = "game"
                     elif menu_rects["settings"].collidepoint(mouse_position):
                         current_scene = "settings"
                     elif menu_rects["exit"].collidepoint(mouse_position):
                         running = False
 
-
+                # --- Settings ---
                 elif current_scene == "settings":
-                    settings_rects = draw_settings_menu(screen, SCREEN_WIDTH, SCREEN_HEIGHT, mouse_position,
-                                                        game_settings)
-
+                    settings_rects = draw_settings_menu(
+                        screen, SCREEN_WIDTH, SCREEN_HEIGHT, mouse_position, game_settings)
                     if settings_rects["back"].collidepoint(mouse_position):
                         current_scene = "menu"
-
                     elif settings_rects["apply"].collidepoint(mouse_position):
                         game_settings.apply_pending_resolution()
                         screen = apply_new_resolution(
@@ -770,27 +856,30 @@ def main():
                             if resolution_rect.collidepoint(mouse_position):
                                 game_settings.select_pending_resolution(index)
 
-                elif current_scene == "game":
+                # --- Game ---
+                elif current_scene == "game" and game_state is not None:
+
                     if menu_button_rect.collidepoint(mouse_position):
                         current_scene = "menu"
                         selected_card = None
                         is_in_combat = False
 
-                    if end_turn_button_rect.collidepoint(mouse_position):
+                    elif end_turn_button_rect.collidepoint(mouse_position):
                         if game_state.is_player_turn() and not is_in_combat:
                             selected_card = None
                             game_state.end_player_turn()
-                            game_state.boss.take_turn(game_state.boss_board)
+                            game_state.boss.take_turn(
+                                game_state.boss_board, game_state.boss_maximum_mana)
                             game_state.save_board_snapshot()
-                            # Build animation states BEFORE combat queue — health values must be pre-combat
-                            player_animation_states = build_animation_states(game_state.player_board, PLAYER_BOARD_Y)
-                            boss_animation_states = build_animation_states(game_state.boss_board, BOSS_BOARD_Y)
-                            # Build event queue AFTER animation states — this mutates unit health
+                            player_animation_states = build_animation_states(
+                                game_state.player_board, PLAYER_BOARD_Y)
+                            boss_animation_states = build_animation_states(
+                                game_state.boss_board, BOSS_BOARD_Y)
                             combat_event_queue = build_combat_event_queue(game_state)
                             last_combat_event_time = current_time
                             is_in_combat = True
 
-                    if not is_in_combat:
+                    elif not is_in_combat:
                         clicked_hand_card = None
                         for card, card_rect in hand_card_rects:
                             if card_rect.collidepoint(mouse_position):
@@ -809,13 +898,14 @@ def main():
                                 if success:
                                     selected_card = None
 
-        # --- Combat event processing ---
-        if current_scene == "game" and game_state is not None:
+        # ===========================
+        # --- Combat Processing ---
+        # ===========================
+        if current_scene == "game" and game_state is not None and is_in_combat:
             any_animation_active = any(
-                state.is_animating for state in player_animation_states + boss_animation_states
-            )
+                state.is_animating for state in player_animation_states + boss_animation_states)
 
-            if is_in_combat and not any_animation_active:
+            if not any_animation_active:
                 if current_time - last_combat_event_time >= COMBAT_EVENT_DELAY_MILLISECONDS:
                     if combat_event_queue:
                         combat_event = combat_event_queue.pop(0)
@@ -823,10 +913,12 @@ def main():
                         if combat_event["type"] == "attack":
                             attacker = combat_event["attacker"]
                             target = combat_event["target"]
+
                             pending_damage_map = {
                                 attacker: {"damage_received": combat_event["damage_to_attacker"]},
                                 target: {"damage_received": combat_event["damage_to_target"]},
                             }
+
                             for state in player_animation_states + boss_animation_states:
                                 if state.unit is attacker:
                                     state.pending_display_health = attacker.health
@@ -835,12 +927,21 @@ def main():
                                     state.pending_display_health = target.health
                                     state.damage_applied = False
 
-                            trigger_attack_animation(player_animation_states, attacker, target, boss_animation_states,
-                                                     current_time)
-                            trigger_attack_animation(boss_animation_states, attacker, target, player_animation_states,
-                                                     current_time)
-                            trigger_defender_animation(player_animation_states, target, current_time)
-                            trigger_defender_animation(boss_animation_states, target, current_time)
+                            trigger_attack_animation(
+                                player_animation_states, attacker, target,
+                                boss_animation_states, current_time)
+                            trigger_attack_animation(
+                                boss_animation_states, attacker, target,
+                                player_animation_states, current_time)
+
+                            target_in_player = any(
+                                s.unit is target for s in player_animation_states)
+                            if target_in_player:
+                                trigger_defender_animation(
+                                    player_animation_states, target, current_time)
+                            else:
+                                trigger_defender_animation(
+                                    boss_animation_states, target, current_time)
 
                         elif combat_event["type"] == "unit_will_die":
                             dead_unit = combat_event["unit"]
@@ -856,7 +957,22 @@ def main():
                             boss_animation_states = [
                                 s for s in boss_animation_states if s.unit is not dead_unit]
 
+                        elif combat_event["type"] == "hero_hit":
+                            attacker = combat_event["attacker"]
+                            target = combat_event["target"]
+                            trigger_hero_hit_animation(
+                                player_animation_states, attacker, target, current_time)
+                            trigger_hero_hit_animation(
+                                boss_animation_states, attacker, target, current_time)
+                            damage_popup_queue.append({
+                                "target": target,
+                                "amount": combat_event["damage"],
+                            })
+
                         elif combat_event["type"] == "combat_end":
+                            game_state.apply_combat_damage(
+                                combat_event["surviving_player_units"],
+                                combat_event["surviving_boss_units"])
                             game_state.restore_boards_from_snapshot()
                             player_animation_states = []
                             boss_animation_states = []
@@ -869,38 +985,49 @@ def main():
             update_animation_states(player_animation_states, pending_damage_map, current_time)
             update_animation_states(boss_animation_states, pending_damage_map, current_time)
 
+        # ===========================
+        # --- Popup Processing ---
+        # ===========================
+        if current_scene == "game":
+            if round_damage_popup is not None:
+                if current_time - round_damage_popup["start_time"] > DAMAGE_POPUP_DURATION_MILLISECONDS:
+                    round_damage_popup = None
+
+            if damage_popup_queue and current_time - last_damage_popup_time >= 400:
+                next_popup = damage_popup_queue.pop(0)
+                round_damage_popup = {
+                    "target": next_popup["target"],
+                    "amount": next_popup["amount"],
+                    "start_time": current_time,
+                }
+                last_damage_popup_time = current_time
+
+        # =====================
         # --- Drawing ---
+        # =====================
         if current_scene == "menu":
             draw_main_menu(screen, SCREEN_WIDTH, SCREEN_HEIGHT, mouse_position)
 
         elif current_scene == "settings":
             draw_settings_menu(screen, SCREEN_WIDTH, SCREEN_HEIGHT, mouse_position, game_settings)
 
-
         elif current_scene == "game" and game_state is not None:
-
             draw_game_board_background(screen)
             draw_boss_hand(screen, game_state.boss_hand_size)
-            draw_boss_board(screen, game_state.boss_board, boss_animation_states)
+
+            displayed_boss_board = (
+                game_state.boss_board if is_in_combat else game_state.previous_boss_board)
+            draw_boss_board(
+                screen, displayed_boss_board,
+                boss_animation_states if is_in_combat else None)
             draw_player_board(screen, game_state.player_board, player_animation_states)
 
-            # Hero portraits
             draw_hero_portrait(
-                screen,
-                name="The Swamp King",
-                health=game_state.boss_health,
-                centre_x=SCREEN_WIDTH // 2,
-                top_y=BOSS_PORTRAIT_Y,
-                is_player=False
-            )
+                screen, name="The Swamp King", health=game_state.boss_health,
+                centre_x=SCREEN_WIDTH // 2, top_y=BOSS_PORTRAIT_Y, is_player=False)
             draw_hero_portrait(
-                screen,
-                name="Hero",
-                health=game_state.player_health,
-                centre_x=SCREEN_WIDTH // 2,
-                top_y=PLAYER_PORTRAIT_Y,
-                is_player=True
-            )
+                screen, name="Hero", health=game_state.player_health,
+                centre_x=SCREEN_WIDTH // 2, top_y=PLAYER_PORTRAIT_Y, is_player=True)
 
             hand_card_rects = draw_hand(
                 screen, game_state.player_hand, selected_card,
@@ -911,6 +1038,7 @@ def main():
             end_turn_button_rect = draw_end_turn_button(
                 screen, game_state.is_player_turn() and not is_in_combat)
             menu_button_rect = draw_menu_button(screen, mouse_position)
+            draw_damage_popup(screen, round_damage_popup, current_time)
 
         pygame.display.flip()
         clock.tick(FPS)
