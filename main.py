@@ -124,8 +124,11 @@ def draw_hand(surface: pygame.Surface, hand: Hand, selected_card: Unit, current_
 
 def draw_player_board(surface: pygame.Surface, board: list,
                       animation_states: list = None) -> list[tuple]:
-    """Draws all units on the player board using animation positions if available."""
-    total_board_width = len(board) * CARD_WIDTH + (len(board) - 1) * CARD_SPACING
+    """Draws all units on the player board as Battlegrounds-style tokens."""
+    token_width = 120
+    token_height = 140
+    token_spacing = 16
+    total_board_width = len(board) * token_width + (len(board) - 1) * token_spacing
     start_x = (SCREEN_WIDTH - total_board_width) // 2
     card_rects = []
 
@@ -134,34 +137,37 @@ def draw_player_board(surface: pygame.Surface, board: list,
         if animation_states:
             state = next((s for s in animation_states if s.unit is unit), None)
 
-        card_x = state.current_x if state else start_x + index * (CARD_WIDTH + CARD_SPACING)
-        card_y = state.current_y if state else PLAYER_BOARD_Y + (BOARD_ZONE_HEIGHT - CARD_HEIGHT) // 2
+        card_x = state.current_x if state else start_x + index * (token_width + token_spacing)
+        card_y = state.current_y if state else PLAYER_BOARD_Y + (BOARD_ZONE_HEIGHT - token_height) // 2
         display_health = state.display_health if state else None
 
-        draw_unit_card(surface, unit, card_x, card_y, display_health=display_health)
-        card_rects.append((unit, pygame.Rect(card_x, card_y, CARD_WIDTH, CARD_HEIGHT)))
+        draw_unit_token(surface, unit, card_x, card_y, display_health=display_health)
+        card_rects.append((unit, pygame.Rect(card_x, card_y, token_width, token_height)))
 
     return card_rects
 
 
 def draw_boss_board(surface: pygame.Surface, board: list,
                     animation_states: list = None) -> list[tuple]:
-    """Draws all units on the boss board using animation positions if available."""
-    total_board_width = len(board) * CARD_WIDTH + (len(board) - 1) * CARD_SPACING
+    """Draws all units on the boss board as Battlegrounds-style tokens."""
+    token_width = 120
+    token_height = 140
+    token_spacing = 16
+    total_board_width = len(board) * token_width + (len(board) - 1) * token_spacing
     start_x = (SCREEN_WIDTH - total_board_width) // 2
     card_rects = []
 
     for index, unit in enumerate(board):
-        state = None  # ← always initialise to None first
+        state = None
         if animation_states:
             state = next((s for s in animation_states if s.unit is unit), None)
 
-        card_x = state.current_x if state else start_x + index * (CARD_WIDTH + CARD_SPACING)
-        card_y = state.current_y if state else BOSS_BOARD_Y + (BOARD_ZONE_HEIGHT - CARD_HEIGHT) // 2
+        card_x = state.current_x if state else start_x + index * (token_width + token_spacing)
+        card_y = state.current_y if state else BOSS_BOARD_Y + (BOARD_ZONE_HEIGHT - token_height) // 2
         display_health = state.display_health if state else None
 
-        draw_unit_card(surface, unit, card_x, card_y, display_health=display_health)
-        card_rects.append((unit, pygame.Rect(card_x, card_y, CARD_WIDTH, CARD_HEIGHT)))
+        draw_unit_token(surface, unit, card_x, card_y, display_health=display_health)
+        card_rects.append((unit, pygame.Rect(card_x, card_y, token_width, token_height)))
 
     return card_rects
 
@@ -276,13 +282,16 @@ class UnitAnimationState:
 
 def build_animation_states(board: list, board_y: int) -> list[UnitAnimationState]:
     """Builds a list of UnitAnimationState objects for each unit on a board."""
-    total_board_width = len(board) * CARD_WIDTH + (len(board) - 1) * CARD_SPACING
+    token_width = 120
+    token_height = 140
+    token_spacing = 16
+    total_board_width = len(board) * token_width + (len(board) - 1) * token_spacing
     start_x = (SCREEN_WIDTH - total_board_width) // 2
     animation_states = []
 
     for index, unit in enumerate(board):
-        card_x = start_x + index * (CARD_WIDTH + CARD_SPACING)
-        card_y = board_y + (BOARD_ZONE_HEIGHT - CARD_HEIGHT) // 2
+        card_x = start_x + index * (token_width + token_spacing)
+        card_y = board_y + (BOARD_ZONE_HEIGHT - token_height) // 2
         animation_states.append(UnitAnimationState(unit, card_x, card_y))
 
     return animation_states
@@ -374,6 +383,58 @@ def draw_end_turn_button(surface: pygame.Surface, is_player_turn: bool) -> pygam
     surface.blit(label_surface, (label_x, label_y))
 
     return button_rect
+
+
+def draw_unit_token(surface: pygame.Surface, unit: Unit, x: int, y: int,
+                    display_health: int = None):
+    """Draws a Battlegrounds-style oval unit token for the board.
+    Shows art, attack, health, and a taunt indicator if applicable."""
+    token_width = 120
+    token_height = 140
+
+    # Taunt border — drawn first so it sits behind the token
+    if unit.has_taunt:
+        taunt_border_colour = (220, 170, 30)
+        taunt_glow_rect = pygame.Rect(x - 4, y - 4, token_width + 8, token_height + 8)
+        pygame.draw.ellipse(surface, taunt_border_colour, taunt_glow_rect)
+        # Second inner glow ring
+        taunt_inner_rect = pygame.Rect(x - 2, y - 2, token_width + 4, token_height + 4)
+        pygame.draw.ellipse(surface, (255, 210, 80), taunt_inner_rect, width=2)
+
+    # Token background oval
+    token_rect = pygame.Rect(x, y, token_width, token_height)
+    pygame.draw.ellipse(surface, (80, 70, 90), token_rect)
+
+    # Art placeholder — slightly inset oval
+    art_rect = pygame.Rect(x + 6, y + 6, token_width - 12, token_height - 12)
+    pygame.draw.ellipse(surface, (100, 100, 120), art_rect)
+
+    # Token border
+    border_colour = (200, 180, 120) if unit.has_taunt else (160, 140, 100)
+    pygame.draw.ellipse(surface, border_colour, token_rect, width=3)
+
+    # Attack circle (bottom left)
+    font_stats = pygame.font.SysFont(None, 30)
+    attack_circle_x = x + 14
+    attack_circle_y = y + token_height - 10
+    pygame.draw.circle(surface, (180, 140, 20), (attack_circle_x, attack_circle_y), 16)
+    pygame.draw.circle(surface, (255, 200, 50), (attack_circle_x, attack_circle_y), 16, width=2)
+    attack_surface = font_stats.render(str(unit.attack), True, COLOUR_TEXT_DEFAULT)
+    attack_x = attack_circle_x - attack_surface.get_width() // 2
+    attack_y = attack_circle_y - attack_surface.get_height() // 2
+    surface.blit(attack_surface, (attack_x, attack_y))
+
+    # Health circle (bottom right)
+    shown_health = display_health if display_health is not None else unit.health
+    health_circle_x = x + token_width - 14
+    health_circle_y = y + token_height - 10
+    health_colour_fill = (160, 30, 30) if shown_health > 0 else (80, 80, 80)
+    pygame.draw.circle(surface, health_colour_fill, (health_circle_x, health_circle_y), 16)
+    pygame.draw.circle(surface, (220, 80, 80), (health_circle_x, health_circle_y), 16, width=2)
+    health_surface = font_stats.render(str(shown_health), True, COLOUR_TEXT_DEFAULT)
+    health_x = health_circle_x - health_surface.get_width() // 2
+    health_y = health_circle_y - health_surface.get_height() // 2
+    surface.blit(health_surface, (health_x, health_y))
 
 
 def main():
