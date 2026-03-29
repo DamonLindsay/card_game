@@ -455,6 +455,18 @@ def trigger_attack_animation(animation_states: list[UnitAnimationState], attacki
     attacker_state.animation_start_time = start_time
 
 
+def trigger_defender_animation(animation_states: list, defending_unit: Unit, start_time: int):
+    """Triggers a small recoil animation on the defending unit when hit."""
+    defender_state = next((state for state in animation_states if state.unit is defending_unit), None)
+    if defender_state is None:
+        return
+    defender_state.animation_direction_x = 0
+    defender_state.animation_direction_y = 0.15
+    defender_state.slide_distance = 8
+    defender_state.is_animating = True
+    defender_state.animation_start_time = start_time
+
+
 def apply_new_resolution(new_width: int, new_height: int, screen: pygame.Surface):
     """Recalculates all layout constants and resizes the window when resolution changes."""
     global SCREEN_WIDTH, SCREEN_HEIGHT, PLAYER_BOARD_Y, BOSS_BOARD_Y, HAND_Y_POSITION
@@ -765,15 +777,15 @@ def main():
                         is_in_combat = False
 
                     if end_turn_button_rect.collidepoint(mouse_position):
-
                         if game_state.is_player_turn() and not is_in_combat:
                             selected_card = None
                             game_state.end_player_turn()
                             game_state.boss.take_turn(game_state.boss_board)
                             game_state.save_board_snapshot()
-                            # Build animation states BEFORE combat queue so health values are pre-combat
+                            # Build animation states BEFORE combat queue — health values must be pre-combat
                             player_animation_states = build_animation_states(game_state.player_board, PLAYER_BOARD_Y)
                             boss_animation_states = build_animation_states(game_state.boss_board, BOSS_BOARD_Y)
+                            # Build event queue AFTER animation states — this mutates unit health
                             combat_event_queue = build_combat_event_queue(game_state)
                             last_combat_event_time = current_time
                             is_in_combat = True
@@ -816,17 +828,19 @@ def main():
                                 target: {"damage_received": combat_event["damage_to_target"]},
                             }
                             for state in player_animation_states + boss_animation_states:
-                                if state.unit is attacker or state.unit is target:
-                                    state.pending_display_health = state.unit.health
+                                if state.unit is attacker:
+                                    state.pending_display_health = attacker.health
                                     state.damage_applied = False
-                            trigger_attack_animation(
-                                player_animation_states, attacker, target,
-                                boss_animation_states, current_time
-                            )
-                            trigger_attack_animation(
-                                boss_animation_states, attacker, target,
-                                player_animation_states, current_time
-                            )
+                                elif state.unit is target:
+                                    state.pending_display_health = target.health
+                                    state.damage_applied = False
+
+                            trigger_attack_animation(player_animation_states, attacker, target, boss_animation_states,
+                                                     current_time)
+                            trigger_attack_animation(boss_animation_states, attacker, target, player_animation_states,
+                                                     current_time)
+                            trigger_defender_animation(player_animation_states, target, current_time)
+                            trigger_defender_animation(boss_animation_states, target, current_time)
 
                         elif combat_event["type"] == "unit_will_die":
                             dead_unit = combat_event["unit"]
