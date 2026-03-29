@@ -16,8 +16,11 @@ class GameState:
 
         self.current_mana = 1
         self.maximum_mana = 1
+        self.boss_current_mana = 1
+        self.boss_maximum_mana = 1
         self.turn_number = 1
         self.current_turn = "player"
+        self.boss_hand_size = 0
 
         self.player_deck = player_deck
         self.player_hand = Hand()
@@ -52,8 +55,12 @@ class GameState:
         self.turn_number += 1
         self.maximum_mana = min(self.turn_number, self.MAXIMUM_MANA)
         self.current_mana = self.maximum_mana
+        self.boss_maximum_mana = min(self.turn_number, self.MAXIMUM_MANA)
+        self.boss_current_mana = self.boss_maximum_mana
         self.current_turn = "player"
         self.draw_card()
+        if self.boss_hand_size < Hand.MAXIMUM_HAND_SIZE:
+            self.boss_hand_size += 1
 
     def is_player_turn(self) -> bool:
         """Returns True if it is currently the player's turn."""

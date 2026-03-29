@@ -24,10 +24,14 @@ CARD_HEIGHT = 200
 CARD_SPACING = 20
 
 # --- Board Layout ---
-PLAYER_BOARD_Y = SCREEN_HEIGHT // 2 + 30
-BOSS_BOARD_Y = 60
-BOARD_ZONE_HEIGHT = 150
-HAND_Y_POSITION = SCREEN_HEIGHT - CARD_HEIGHT - 10
+BOARD_CENTRE_Y = SCREEN_HEIGHT // 2
+BOSS_BOARD_Y = BOARD_CENTRE_Y - 195
+PLAYER_BOARD_Y = BOARD_CENTRE_Y + 15
+BOARD_ZONE_HEIGHT = 175
+BOSS_PORTRAIT_Y = 120
+PLAYER_PORTRAIT_Y = BOARD_CENTRE_Y + 210
+HAND_Y_POSITION = SCREEN_HEIGHT - CARD_HEIGHT + 60
+HAND_Y_POSITION_HOVERED = SCREEN_HEIGHT - CARD_HEIGHT - 10
 
 # --- Colours ---
 COLOUR_MANA_FILL = (30, 80, 200)
@@ -105,19 +109,29 @@ def draw_stat_circle(surface: pygame.Surface, value: int, center_x: int, center_
     surface.blit(value_surface, (value_x, value_y))
 
 
-def draw_hand(surface: pygame.Surface, hand: Hand, selected_card: Unit, current_mana: int) -> list[tuple]:
-    """Draws all cards in the hand and returns a list of (card, rect) for click detection."""
+def draw_hand(surface: pygame.Surface, hand: Hand, selected_card: Unit,
+              current_mana: int, mouse_position: tuple = (0, 0)) -> list[tuple]:
+    """Draws all cards in the hand. Cards peek from the bottom and rise on hover."""
     total_hand_width = len(hand.cards) * CARD_WIDTH + (len(hand.cards) - 1) * CARD_SPACING
     start_x = (SCREEN_WIDTH - total_hand_width) // 2
     card_rects = []
 
     for index, card in enumerate(hand.cards):
         card_x = start_x + index * (CARD_WIDTH + CARD_SPACING)
+
+        # Check if this card is being hovered
+        peek_rect = pygame.Rect(card_x, HAND_Y_POSITION, CARD_WIDTH, CARD_HEIGHT)
+        is_hovered = peek_rect.collidepoint(mouse_position)
         is_selected = card is selected_card
+
+        # Selected cards also rise fully
+        card_y = HAND_Y_POSITION_HOVERED if (is_hovered or is_selected) else HAND_Y_POSITION
+
         is_affordable = current_mana >= card.mana_cost
         if isinstance(card, Unit):
-            draw_unit_card(surface, card, card_x, HAND_Y_POSITION, is_selected=is_selected, is_affordable=is_affordable)
-        card_rects.append((card, pygame.Rect(card_x, HAND_Y_POSITION, CARD_WIDTH, CARD_HEIGHT)))
+            draw_unit_card(surface, card, card_x, card_y,
+                           is_selected=is_selected, is_affordable=is_affordable)
+        card_rects.append((card, pygame.Rect(card_x, card_y, CARD_WIDTH, CARD_HEIGHT)))
 
     return card_rects
 
@@ -172,27 +186,70 @@ def draw_boss_board(surface: pygame.Surface, board: list,
     return card_rects
 
 
-def draw_mana_bar(surface: pygame.Surface, current_mana: int, maximum_mana: int):
-    """Draws the mana pip bar in the bottom right corner."""
-    font = pygame.font.SysFont(None, 22)
-    pip_radius = 10
-    pip_spacing = 4
-    pip_y = SCREEN_HEIGHT // 2
+def draw_teardrop(surface: pygame.Surface, centre_x: int, centre_y: int,
+                  radius: int, colour: tuple, border_colour: tuple):
+    """Draws a single teardrop shape — circle on top with a point at the bottom."""
+    pygame.draw.circle(surface, colour, (centre_x, centre_y), radius)
+    pygame.draw.circle(surface, border_colour, (centre_x, centre_y), radius, width=2)
+    point_x = centre_x
+    point_y = centre_y + radius + radius // 2
+    triangle_points = [
+        (centre_x - radius, centre_y),
+        (centre_x + radius, centre_y),
+        (point_x, point_y),
+    ]
+    pygame.draw.polygon(surface, colour, triangle_points)
+    # Border lines for the point
+    pygame.draw.line(surface, border_colour, (centre_x - radius, centre_y), (point_x, point_y), 2)
+    pygame.draw.line(surface, border_colour, (centre_x + radius, centre_y), (point_x, point_y), 2)
 
-    # Draw pips right to left, anchored from the End Turn button edge.
-    anchor_x = SCREEN_WIDTH - 180  # leaves room for End Turn button
-    total_width = maximum_mana * (pip_radius * 2 + pip_spacing)
-    start_x = anchor_x - total_width
+
+def draw_player_mana_bar(surface: pygame.Surface, current_mana: int, maximum_mana: int):
+    """Draws the player mana bar to the right of the player portrait, wrapping at 5 gems."""
+    font = pygame.font.SysFont(None, 24)
+    gem_radius = 12
+    gem_spacing = 6
+    gems_per_column = 5
+
+    bar_x_start = SCREEN_WIDTH // 2 + 80
+    bar_y_start = PLAYER_PORTRAIT_Y + 10
 
     for index in range(maximum_mana):
-        pip_x = start_x + index * (pip_radius * 2 + pip_spacing) + pip_radius
-        colour = COLOUR_MANA_FILL if index < current_mana else COLOUR_MANA_EMPTY
-        pygame.draw.circle(surface, colour, (pip_x, pip_y), pip_radius)
-        pygame.draw.circle(surface, COLOUR_STAT_MANA, (pip_x, pip_y), pip_radius, width=2)
+        column = index // gems_per_column
+        row = index % gems_per_column
+        gem_x = bar_x_start + column * (gem_radius * 2 + gem_spacing + 4)
+        gem_y = bar_y_start + row * (gem_radius * 2 + gem_spacing)
+        is_filled = index < current_mana
+        fill_colour = (30, 80, 200) if is_filled else (20, 20, 50)
+        border_colour = (100, 150, 255) if is_filled else (40, 40, 80)
+        draw_teardrop(surface, gem_x, gem_y, gem_radius, fill_colour, border_colour)
 
-    mana_label = font.render(f"{current_mana} / {maximum_mana}", True, COLOUR_TEXT_DEFAULT)
-    label_x = start_x + (total_width - mana_label.get_width()) // 2
-    surface.blit(mana_label, (label_x, pip_y + pip_radius + 4))
+    mana_label = font.render(f"{current_mana}/{maximum_mana}", True, (150, 180, 255))
+    surface.blit(mana_label, (bar_x_start, bar_y_start + gems_per_column * (gem_radius * 2 + gem_spacing) + 4))
+
+
+def draw_boss_mana_bar(surface: pygame.Surface, current_mana: int, maximum_mana: int):
+    """Draws the boss mana bar to the right of the boss portrait, wrapping at 5 gems."""
+    font = pygame.font.SysFont(None, 24)
+    gem_radius = 12
+    gem_spacing = 6
+    gems_per_column = 5
+
+    bar_x_start = SCREEN_WIDTH // 2 + 80
+    bar_y_start = BOSS_PORTRAIT_Y + 10
+
+    for index in range(maximum_mana):
+        column = index // gems_per_column
+        row = index % gems_per_column
+        gem_x = bar_x_start + column * (gem_radius * 2 + gem_spacing + 4)
+        gem_y = bar_y_start + row * (gem_radius * 2 + gem_spacing)
+        is_filled = index < current_mana
+        fill_colour = (180, 30, 30) if is_filled else (50, 20, 20)
+        border_colour = (255, 100, 100) if is_filled else (80, 40, 40)
+        draw_teardrop(surface, gem_x, gem_y, gem_radius, fill_colour, border_colour)
+
+    mana_label = font.render(f"{current_mana}/{maximum_mana}", True, (255, 150, 150))
+    surface.blit(mana_label, (bar_x_start, bar_y_start + gems_per_column * (gem_radius * 2 + gem_spacing) + 4))
 
 
 def draw_health(surface: pygame.Surface, health: int, label: str, x: int, y: int, colour: tuple):
@@ -226,20 +283,69 @@ def draw_menu_button(surface: pygame.Surface, mouse_position: tuple) -> pygame.R
     return button_rect
 
 
-def draw_board_zones(surface: pygame.Surface):
-    """Draws the player and boss board zone outlines."""
-    player_zone = pygame.Rect(60, PLAYER_BOARD_Y, SCREEN_WIDTH - 140, BOARD_ZONE_HEIGHT)
-    boss_zone = pygame.Rect(60, BOSS_BOARD_Y, SCREEN_WIDTH - 140, BOARD_ZONE_HEIGHT)
-    pygame.draw.rect(surface, (50, 50, 70), player_zone, border_radius=8)
-    pygame.draw.rect(surface, (70, 50, 50), boss_zone, border_radius=8)
-    pygame.draw.rect(surface, (80, 80, 100), player_zone, width=1, border_radius=8)
-    pygame.draw.rect(surface, (100, 80, 80), boss_zone, width=1, border_radius=8)
+def draw_game_board_background(surface: pygame.Surface):
+    """Draws the full game board background with player and boss zones."""
+    surface.fill((25, 22, 35))
+
+    # Centre dividing line
+    pygame.draw.line(surface, (60, 55, 80),
+                     (200, SCREEN_HEIGHT // 2),
+                     (SCREEN_WIDTH - 200, SCREEN_HEIGHT // 2), 2)
+
+    # Boss board zone
+    boss_zone_rect = pygame.Rect(220, BOSS_BOARD_Y, SCREEN_WIDTH - 440, BOARD_ZONE_HEIGHT)
+    pygame.draw.rect(surface, (45, 30, 30), boss_zone_rect, border_radius=12)
+    pygame.draw.rect(surface, (90, 55, 55), boss_zone_rect, width=1, border_radius=12)
+
+    # Player board zone
+    player_zone_rect = pygame.Rect(220, PLAYER_BOARD_Y, SCREEN_WIDTH - 440, BOARD_ZONE_HEIGHT)
+    pygame.draw.rect(surface, (30, 35, 50), player_zone_rect, border_radius=12)
+    pygame.draw.rect(surface, (55, 65, 90), player_zone_rect, width=1, border_radius=12)
 
     font = pygame.font.SysFont(None, 20)
-    player_label = font.render("Your Board", True, (120, 120, 150))
-    boss_label = font.render("Boss Board", True, (150, 120, 120))
-    surface.blit(player_label, (70, PLAYER_BOARD_Y + 6))
-    surface.blit(boss_label, (70, BOSS_BOARD_Y + 6))
+    boss_label = font.render("Boss Board", True, (100, 70, 70))
+    player_label = font.render("Your Board", True, (70, 80, 110))
+    surface.blit(boss_label, (230, BOSS_BOARD_Y + 8))
+    surface.blit(player_label, (230, PLAYER_BOARD_Y + 8))
+
+
+def draw_boss_hand(surface: pygame.Surface, hand_size: int):
+    """Draws face-down cards for the boss hand so the player can see how many cards they hold."""
+    if hand_size == 0:
+        return
+
+    face_down_width = CARD_WIDTH
+    face_down_height = CARD_HEIGHT
+    face_down_spacing = CARD_SPACING
+    total_width = hand_size * face_down_width + (hand_size - 1) * face_down_spacing
+    start_x = (SCREEN_WIDTH - total_width) // 2
+
+    # Mirror the hand — sits above the boss portrait, peeking down from the top
+    card_y = -(CARD_HEIGHT - 60)
+
+    for index in range(hand_size):
+        card_x = start_x + index * (face_down_width + face_down_spacing)
+
+        card_rect = pygame.Rect(card_x, card_y, face_down_width, face_down_height)
+        pygame.draw.rect(surface, (35, 30, 55), card_rect, border_radius=8)
+        pygame.draw.rect(surface, (70, 55, 110), card_rect, width=2, border_radius=8)
+
+        inner_rect = pygame.Rect(card_x + 6, card_y + 6,
+                                 face_down_width - 12, face_down_height - 12)
+        pygame.draw.rect(surface, (55, 45, 85), inner_rect, width=1, border_radius=6)
+
+        # Diamond pattern in centre
+        centre_x = card_x + face_down_width // 2
+        centre_y = card_y + face_down_height // 2
+        diamond_size = 14
+        diamond_points = [
+            (centre_x, centre_y - diamond_size),
+            (centre_x + diamond_size, centre_y),
+            (centre_x, centre_y + diamond_size),
+            (centre_x - diamond_size, centre_y),
+        ]
+        pygame.draw.polygon(surface, (80, 60, 130), diamond_points)
+        pygame.draw.polygon(surface, (110, 85, 170), diamond_points, width=2)
 
 
 def build_test_deck() -> Deck:
@@ -260,7 +366,7 @@ def build_test_deck() -> Deck:
 
 def get_player_board_zone_rect() -> pygame.Rect:
     """Returns the clickable rect for the player board zone."""
-    return pygame.Rect(60, PLAYER_BOARD_Y, SCREEN_WIDTH - 140, BOARD_ZONE_HEIGHT)
+    return pygame.Rect(220, PLAYER_BOARD_Y, SCREEN_WIDTH - 440, BOARD_ZONE_HEIGHT)
 
 
 class UnitAnimationState:
@@ -529,6 +635,56 @@ def draw_unit_token(surface: pygame.Surface, unit: Unit, x: int, y: int,
     surface.blit(health_surface, (health_x, health_y))
 
 
+def draw_hero_portrait(surface: pygame.Surface, name: str, health: int,
+                       centre_x: int, top_y: int, is_player: bool = True):
+    """Draws an arched hero portrait frame with name and health."""
+    portrait_width = 110
+    portrait_height = 130
+    portrait_x = centre_x - portrait_width // 2
+
+    border_colour = (180, 150, 80) if is_player else (180, 80, 80)
+    background_colour = (40, 35, 50)
+    health_colour = (60, 200, 60) if is_player else (220, 60, 60)
+
+    # Portrait background — rounded rect with more curve at top for arch effect
+    portrait_rect = pygame.Rect(portrait_x, top_y, portrait_width, portrait_height)
+    pygame.draw.rect(surface, background_colour, portrait_rect,
+                     border_top_left_radius=portrait_width // 3,
+                     border_top_right_radius=portrait_width // 3,
+                     border_bottom_left_radius=8,
+                     border_bottom_right_radius=8)
+
+    # Art placeholder
+    art_rect = pygame.Rect(portrait_x + 6, top_y + 6, portrait_width - 12, portrait_height - 12)
+    pygame.draw.rect(surface, (70, 65, 85), art_rect,
+                     border_top_left_radius=portrait_width // 2,
+                     border_top_right_radius=portrait_width // 2,
+                     border_bottom_left_radius=4,
+                     border_bottom_right_radius=4)
+
+    # Portrait border
+    pygame.draw.rect(surface, border_colour, portrait_rect, width=3,
+                     border_top_left_radius=portrait_width // 2,
+                     border_top_right_radius=portrait_width // 2,
+                     border_bottom_left_radius=8,
+                     border_bottom_right_radius=8)
+
+    # Name label above portrait
+    font_name = pygame.font.SysFont(None, 22)
+    name_surface = font_name.render(name, True, (200, 200, 200))
+    name_x = centre_x - name_surface.get_width() // 2
+    surface.blit(name_surface, (name_x, top_y - 18))
+
+    # Health circle below portrait
+    health_circle_y = top_y + portrait_height + 20
+    pygame.draw.circle(surface, (30, 30, 45), (centre_x, health_circle_y), 22)
+    pygame.draw.circle(surface, health_colour, (centre_x, health_circle_y), 22, width=3)
+    font_health = pygame.font.SysFont(None, 36)
+    health_surface = font_health.render(str(health), True, health_colour)
+    surface.blit(health_surface, (centre_x - health_surface.get_width() // 2,
+                                  health_circle_y - health_surface.get_height() // 2))
+
+
 def main():
     pygame.init()
 
@@ -706,18 +862,38 @@ def main():
         elif current_scene == "settings":
             draw_settings_menu(screen, SCREEN_WIDTH, SCREEN_HEIGHT, mouse_position, game_settings)
 
+
         elif current_scene == "game" and game_state is not None:
-            screen.fill(BACKGROUND_COLOUR)
-            draw_board_zones(screen)
+
+            draw_game_board_background(screen)
+            draw_boss_hand(screen, game_state.boss_hand_size)
             draw_boss_board(screen, game_state.boss_board, boss_animation_states)
             draw_player_board(screen, game_state.player_board, player_animation_states)
+
+            # Hero portraits
+            draw_hero_portrait(
+                screen,
+                name="The Swamp King",
+                health=game_state.boss_health,
+                centre_x=SCREEN_WIDTH // 2,
+                top_y=BOSS_PORTRAIT_Y,
+                is_player=False
+            )
+            draw_hero_portrait(
+                screen,
+                name="Hero",
+                health=game_state.player_health,
+                centre_x=SCREEN_WIDTH // 2,
+                top_y=PLAYER_PORTRAIT_Y,
+                is_player=True
+            )
+
             hand_card_rects = draw_hand(
-                screen, game_state.player_hand, selected_card, game_state.current_mana)
-            draw_mana_bar(screen, game_state.current_mana, game_state.maximum_mana)
-            draw_health(screen, game_state.player_health, "Your Health",
-                        20, PLAYER_BOARD_Y - 52, COLOUR_HEALTH_PLAYER)
-            draw_health(screen, game_state.boss_health, "Boss Health",
-                        20, BOSS_BOARD_Y + BOARD_ZONE_HEIGHT + 8, COLOUR_HEALTH_BOSS)
+                screen, game_state.player_hand, selected_card,
+                game_state.current_mana, mouse_position)
+
+            draw_player_mana_bar(screen, game_state.current_mana, game_state.maximum_mana)
+            draw_boss_mana_bar(screen, game_state.boss_current_mana, game_state.boss_maximum_mana)
             end_turn_button_rect = draw_end_turn_button(
                 screen, game_state.is_player_turn() and not is_in_combat)
             menu_button_rect = draw_menu_button(screen, mouse_position)
