@@ -17,6 +17,7 @@ COMBAT_EVENT_DELAY_MILLISECONDS = 800
 COMBAT_SLIDE_DURATION_MILLISECONDS = 500
 DAMAGE_POPUP_DURATION_MILLISECONDS = 1500
 TOKEN_DAMAGE_POPUP_DURATION_MILLISECONDS = 800
+DRAG_THRESHOLD = 8  # pixels mouse must move before drag begins
 
 # --- Card Dimensions ---
 CARD_WIDTH = 140
@@ -215,26 +216,49 @@ def draw_hand(surface: pygame.Surface, hand: Hand, selected_card: Unit,
 
 
 def draw_player_board(surface: pygame.Surface, board: list,
-                      animation_states: list = None) -> list[tuple]:
-    """Draws all units on the player board as Battlegrounds-style tokens."""
+                      animation_states: list = None,
+                      drag_insert_index: int = -1,
+                      dragged_card=None) -> list[tuple]:
+    """Draws all units on the player board, with optional gap for drag indicator."""
     token_width = 120
     token_height = 140
     token_spacing = 16
-    total_board_width = len(board) * token_width + (len(board) - 1) * token_spacing
+
+    display_board = [u for u in board if u is not dragged_card]
+    display_length = len(display_board) + (1 if drag_insert_index >= 0 else 0)
+    total_board_width = display_length * token_width + (display_length - 1) * token_spacing
     start_x = (SCREEN_WIDTH - total_board_width) // 2
     card_rects = []
 
-    for index, unit in enumerate(board):
+    draw_index = 0
+    board_index = 0
+
+    for position in range(display_length):
+        if position == drag_insert_index:
+            draw_board_drop_indicator(surface, draw_index, display_length - 1, PLAYER_BOARD_Y)
+            draw_index += 1
+            continue
+
+        if board_index >= len(display_board):
+            break
+
+        unit = display_board[board_index]
         state = None
         if animation_states:
             state = next((s for s in animation_states if s.unit is unit), None)
 
-        card_x = state.current_x if state else start_x + index * (token_width + token_spacing)
-        card_y = state.current_y if state else PLAYER_BOARD_Y + (BOARD_ZONE_HEIGHT - token_height) // 2
-        display_health = state.display_health if state else None
+        card_x = start_x + draw_index * (token_width + token_spacing)
+        card_y = PLAYER_BOARD_Y + (BOARD_ZONE_HEIGHT - token_height) // 2
+        if state:
+            card_x = state.current_x
+            card_y = state.current_y
 
+        display_health = state.display_health if state else None
         draw_unit_token(surface, unit, card_x, card_y, display_health=display_health)
         card_rects.append((unit, pygame.Rect(card_x, card_y, token_width, token_height)))
+
+        draw_index += 1
+        board_index += 1
 
     return card_rects
 
@@ -433,6 +457,16 @@ def build_test_deck() -> Deck:
 def get_player_board_zone_rect() -> pygame.Rect:
     """Returns the clickable rect for the player board zone."""
     return pygame.Rect(220, PLAYER_BOARD_Y, SCREEN_WIDTH - 440, BOARD_ZONE_HEIGHT)
+
+
+class DragState:
+    def __init__(self):
+        self.is_dragging = False
+        self.dragged_card = None
+        self.drag_source = None  # "hand" or "board"
+        self.drag_x = 0
+        self.drag_y = 0
+        self.origin_index = 0  # index in hand or board before drag started
 
 
 class UnitAnimationState:
@@ -950,12 +984,53 @@ def draw_token_damage_popup(surface: pygame.Surface, popup: dict, current_time: 
     ))
 
 
+def get_board_insert_index(mouse_x: int, board_length: int) -> int:
+    """Returns the index at which a card would be inserted based on mouse x position."""
+    token_width = 120
+    token_spacing = 16
+    total_width = board_length * token_width + (board_length - 1) * token_spacing
+    start_x = (SCREEN_WIDTH - total_width) // 2
+
+    for index in range(board_length):
+        slot_centre_x = start_x + index * (token_width + token_spacing) + token_width // 2
+        if mouse_x < slot_centre_x:
+            return index
+    return board_length
+
+
+def draw_board_drop_indicator(surface: pygame.Surface, insert_index: int,
+                              board_length: int, board_y: int):
+    """Draws a glowing slot indicator and gap on the board at the insert position."""
+    token_width = 120
+    token_height = 140
+    token_spacing = 16
+    gap_width = token_width + token_spacing
+
+    # Calculate positions with gap inserted
+    display_length = board_length + 1
+    total_width = display_length * token_width + (display_length - 1) * token_spacing
+    start_x = (SCREEN_WIDTH - total_width) // 2
+
+    slot_x = start_x + insert_index * (token_width + token_spacing)
+    slot_y = board_y + (BOARD_ZONE_HEIGHT - token_height) // 2
+
+    # Glowing placeholder slot
+    slot_rect = pygame.Rect(slot_x, slot_y, token_width, token_height)
+    pygame.draw.ellipse(surface, (40, 60, 80), slot_rect)
+    pygame.draw.ellipse(surface, (80, 140, 200), slot_rect, width=2)
+
+    # Pulsing inner glow
+    inner_rect = pygame.Rect(slot_x + 8, slot_y + 8, token_width - 16, token_height - 16)
+    pygame.draw.ellipse(surface, (60, 100, 160), inner_rect, width=1)
+
+
 def main():
     pygame.init()
 
     screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.NOFRAME)
     pygame.display.set_caption("Card Game")
     clock = pygame.time.Clock()
+    drag_state = DragState()
 
     current_scene = "menu"
 
@@ -1061,24 +1136,85 @@ def main():
                             last_combat_event_time = current_time
                             is_in_combat = True
 
+
                     elif not is_in_combat:
+                        # Check for click on hand card to begin potential drag
                         clicked_hand_card = None
                         for card, card_rect in hand_card_rects:
                             if card_rect.collidepoint(mouse_position):
                                 clicked_hand_card = card
                                 break
 
-                        if clicked_hand_card is not None:
+                        # Check for click on board card
+                        clicked_board_card = None
+                        for index, unit in enumerate(game_state.player_board):
+                            token_width = 120
+                            token_height = 140
+                            token_spacing = 16
+                            total_width = len(game_state.player_board) * token_width + (
+                                    len(game_state.player_board) - 1) * token_spacing
+                            start_x = (SCREEN_WIDTH - total_width) // 2
+                            card_x = start_x + index * (token_width + token_spacing)
+                            card_y = PLAYER_BOARD_Y + (BOARD_ZONE_HEIGHT - token_height) // 2
+                            if pygame.Rect(card_x, card_y, token_width, token_height).collidepoint(mouse_position):
+                                clicked_board_card = (unit, index)
+                                break
+
+                        if clicked_board_card is not None:
+                            unit, index = clicked_board_card
+                            drag_state.is_dragging = True
+                            drag_state.dragged_card = unit
+                            drag_state.drag_source = "board"
+                            drag_state.origin_index = index
+                            drag_state.drag_x = mouse_position[0]
+                            drag_state.drag_y = mouse_position[1]
+                        elif clicked_hand_card is not None:
                             if clicked_hand_card is selected_card:
                                 selected_card = None
                             else:
+                                drag_state.is_dragging = True
+                                drag_state.dragged_card = clicked_hand_card
+                                drag_state.drag_source = "hand"
+                                drag_state.origin_index = game_state.player_hand.cards.index(clicked_hand_card)
+                                drag_state.drag_x = mouse_position[0]
+                                drag_state.drag_y = mouse_position[1]
                                 selected_card = clicked_hand_card
 
-                        elif selected_card is not None:
-                            if get_player_board_zone_rect().collidepoint(mouse_position):
-                                success = game_state.play_card_to_board(selected_card)
-                                if success:
-                                    selected_card = None
+            if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+                if drag_state.is_dragging and current_scene == "game" and not is_in_combat:
+                    board_zone = get_player_board_zone_rect()
+                    dropped_on_board = board_zone.collidepoint(mouse_position)
+
+                    if drag_state.drag_source == "hand":
+                        if dropped_on_board and game_state.can_afford(drag_state.dragged_card.mana_cost):
+                            insert_index = get_board_insert_index(
+                                mouse_position[0], len(game_state.player_board))
+                            insert_index = min(insert_index, game_state.MAXIMUM_BOARD_SIZE - 1)
+                            game_state.spend_mana(drag_state.dragged_card.mana_cost)
+                            game_state.player_hand.remove_card(drag_state.dragged_card)
+                            game_state.player_board.insert(insert_index, drag_state.dragged_card)
+                            selected_card = None
+                        else:
+                            # Snap back to hand
+                            selected_card = None
+
+                    elif drag_state.drag_source == "board":
+                        if dropped_on_board:
+                            insert_index = get_board_insert_index(
+                                mouse_position[0], len(game_state.player_board) - 1)
+                            game_state.player_board.remove(drag_state.dragged_card)
+                            insert_index = min(insert_index, len(game_state.player_board))
+                            game_state.player_board.insert(insert_index, drag_state.dragged_card)
+                        # Board cards always stay on board regardless of drop position
+
+                    drag_state.is_dragging = False
+                    drag_state.dragged_card = None
+                    drag_state.drag_source = None
+
+            if event.type == pygame.MOUSEMOTION:
+                if drag_state.is_dragging:
+                    drag_state.drag_x = mouse_position[0]
+                    drag_state.drag_y = mouse_position[1]
 
         # ===========================
         # --- Combat Processing ---
@@ -1215,7 +1351,22 @@ def main():
             draw_boss_board(
                 screen, displayed_boss_board,
                 boss_animation_states if is_in_combat else None)
-            draw_player_board(screen, game_state.player_board, player_animation_states)
+
+            # Player board with drag support
+            drag_insert_index = -1
+            dragged_card_display = None
+            if drag_state.is_dragging and not is_in_combat:
+                board_zone = get_player_board_zone_rect()
+                if board_zone.collidepoint(mouse_position):
+                    source_board_length = len(game_state.player_board)
+                    if drag_state.drag_source == "board":
+                        source_board_length -= 1
+                    drag_insert_index = get_board_insert_index(mouse_position[0], source_board_length)
+                dragged_card_display = drag_state.dragged_card
+
+            draw_player_board(screen, game_state.player_board, player_animation_states,
+                              drag_insert_index=drag_insert_index,
+                              dragged_card=dragged_card_display)
 
             for popup in token_damage_popups:
                 draw_token_damage_popup(screen, popup, current_time)
@@ -1233,6 +1384,13 @@ def main():
                 screen, game_state.is_player_turn() and not is_in_combat, mouse_position)
             menu_button_rect = draw_menu_button(screen, mouse_position)
             draw_damage_popup(screen, round_damage_popup, current_time)
+
+            # Dragged card drawn after board but before hand
+            if drag_state.is_dragging and drag_state.dragged_card is not None:
+                drag_draw_x = drag_state.drag_x - CARD_WIDTH // 2
+                drag_draw_y = drag_state.drag_y - CARD_HEIGHT // 2
+                if isinstance(drag_state.dragged_card, Unit):
+                    draw_unit_card(screen, drag_state.dragged_card, drag_draw_x, drag_draw_y)
 
             # Hand and zoom drawn LAST so they appear over everything
             hand_card_rects, hovered_zoom_info = draw_hand(
