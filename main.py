@@ -55,10 +55,13 @@ COLOUR_CARD_UNAFFORDABLE = (120, 60, 60)
 
 def draw_unit_card(surface: pygame.Surface, unit: Unit, x: int, y: int,
                    is_selected: bool = False, is_affordable: bool = True,
-                   display_health: int = None):
+                   display_health: int = None, border_colour_override: tuple = None):
     """Draws a unit card at the given position."""
     background_colour = (60, 60, 80)
-    if is_selected:
+    if border_colour_override is not None:
+        border_colour = border_colour_override
+        border_width = 3
+    elif is_selected:
         border_colour = COLOUR_CARD_SELECTED
         border_width = 3
     elif not is_affordable:
@@ -269,27 +272,28 @@ def draw_teardrop(surface: pygame.Surface, centre_x: int, centre_y: int,
 
 
 def draw_player_mana_bar(surface: pygame.Surface, current_mana: int, maximum_mana: int):
-    """Draws the player mana bar to the right of the player portrait, wrapping at 5 gems."""
+    """Draws the player mana bar at the bottom right of the screen."""
     font = pygame.font.SysFont(None, 24)
     gem_radius = 12
     gem_spacing = 6
-    gems_per_column = 5
+    gems_per_row = 5
 
-    bar_x_start = SCREEN_WIDTH // 2 + 100
-    bar_y_start = PLAYER_PORTRAIT_Y + 10
+    # Anchor to bottom right
+    bar_x_start = SCREEN_WIDTH - 180
+    bar_y_start = SCREEN_HEIGHT - 60
 
     for index in range(maximum_mana):
-        column = index // gems_per_column
-        row = index % gems_per_column
-        gem_x = bar_x_start + column * (gem_radius * 2 + gem_spacing + 4)
-        gem_y = bar_y_start + row * (gem_radius * 2 + gem_spacing)
+        row = index // gems_per_row
+        col = index % gems_per_row
+        gem_x = bar_x_start + col * (gem_radius * 2 + gem_spacing)
+        gem_y = bar_y_start - row * (gem_radius * 2 + gem_spacing)
         is_filled = index < current_mana
         fill_colour = (30, 80, 200) if is_filled else (20, 20, 50)
         border_colour = (100, 150, 255) if is_filled else (40, 40, 80)
         draw_teardrop(surface, gem_x, gem_y, gem_radius, fill_colour, border_colour)
 
     mana_label = font.render(f"{current_mana}/{maximum_mana}", True, (150, 180, 255))
-    surface.blit(mana_label, (bar_x_start, bar_y_start + gems_per_column * (gem_radius * 2 + gem_spacing) + 4))
+    surface.blit(mana_label, (bar_x_start, bar_y_start + gem_radius + 8))
 
 
 def draw_boss_mana_bar(surface: pygame.Surface, current_mana: int, maximum_mana: int):
@@ -821,18 +825,26 @@ def draw_unit_token(surface: pygame.Surface, unit: Unit, x: int, y: int,
                                 mana_circle_y - mana_surface.get_height() // 2))
 
 
-def draw_hero_portrait(surface: pygame.Surface, name: str, health: int,
-                       centre_x: int, top_y: int, is_player: bool = True):
+def draw_hero_portrait(surface: pygame.Surface, name: str, health: int | None,
+                       centre_x: int, top_y: int, is_player: bool = True,
+                       is_shopkeeper: bool = False):
     """Draws an arched hero portrait frame with name and health."""
     portrait_width = 110
     portrait_height = 130
     portrait_x = centre_x - portrait_width // 2
 
-    border_colour = (180, 150, 80) if is_player else (180, 80, 80)
-    background_colour = (40, 35, 50)
+    if is_shopkeeper:
+        border_colour = (180, 150, 80)
+        background_colour = (40, 50, 40)
+    elif is_player:
+        border_colour = (180, 150, 80)
+        background_colour = (40, 35, 50)
+    else:
+        border_colour = (180, 80, 80)
+        background_colour = (40, 35, 50)
+
     health_colour = (60, 200, 60) if is_player else (220, 60, 60)
 
-    # Portrait background — rounded rect with more curve at top for arch effect
     portrait_rect = pygame.Rect(portrait_x, top_y, portrait_width, portrait_height)
     pygame.draw.rect(surface, background_colour, portrait_rect,
                      border_top_left_radius=portrait_width // 3,
@@ -840,35 +852,45 @@ def draw_hero_portrait(surface: pygame.Surface, name: str, health: int,
                      border_bottom_left_radius=8,
                      border_bottom_right_radius=8)
 
-    # Art placeholder
+    art_colour = (60, 90, 60) if is_shopkeeper else (70, 65, 85)
     art_rect = pygame.Rect(portrait_x + 6, top_y + 6, portrait_width - 12, portrait_height - 12)
-    pygame.draw.rect(surface, (70, 65, 85), art_rect,
+    pygame.draw.rect(surface, art_colour, art_rect,
                      border_top_left_radius=portrait_width // 2,
                      border_top_right_radius=portrait_width // 2,
                      border_bottom_left_radius=4,
                      border_bottom_right_radius=4)
 
-    # Portrait border
+    # Draw a simple shopkeeper icon — a coin
+    if is_shopkeeper:
+        coin_x = centre_x
+        coin_y = top_y + portrait_height // 2
+        pygame.draw.circle(surface, (200, 170, 30), (coin_x, coin_y), 20)
+        pygame.draw.circle(surface, (240, 210, 60), (coin_x, coin_y), 20, width=3)
+        font_coin = pygame.font.SysFont(None, 28)
+        coin_label = font_coin.render("$", True, (60, 40, 10))
+        surface.blit(coin_label, (coin_x - coin_label.get_width() // 2,
+                                  coin_y - coin_label.get_height() // 2))
+
     pygame.draw.rect(surface, border_colour, portrait_rect, width=3,
                      border_top_left_radius=portrait_width // 2,
                      border_top_right_radius=portrait_width // 2,
                      border_bottom_left_radius=8,
                      border_bottom_right_radius=8)
 
-    # Name label above portrait
     font_name = pygame.font.SysFont(None, 22)
     name_surface = font_name.render(name, True, (200, 200, 200))
     name_x = centre_x - name_surface.get_width() // 2
     surface.blit(name_surface, (name_x, top_y - 18))
 
-    # Health circle below portrait
-    health_circle_y = top_y + portrait_height + 20
-    pygame.draw.circle(surface, (30, 30, 45), (centre_x, health_circle_y), 22)
-    pygame.draw.circle(surface, health_colour, (centre_x, health_circle_y), 22, width=3)
-    font_health = pygame.font.SysFont(None, 36)
-    health_surface = font_health.render(str(health), True, health_colour)
-    surface.blit(health_surface, (centre_x - health_surface.get_width() // 2,
-                                  health_circle_y - health_surface.get_height() // 2))
+    # Only draw health circle if health is provided
+    if health is not None:
+        health_circle_y = top_y + portrait_height + 20
+        pygame.draw.circle(surface, (30, 30, 45), (centre_x, health_circle_y), 22)
+        pygame.draw.circle(surface, health_colour, (centre_x, health_circle_y), 22, width=3)
+        font_health = pygame.font.SysFont(None, 36)
+        health_surface = font_health.render(str(health), True, health_colour)
+        surface.blit(health_surface, (centre_x - health_surface.get_width() // 2,
+                                      health_circle_y - health_surface.get_height() // 2))
 
 
 def draw_damage_popup(surface: pygame.Surface, popup: dict, current_time: int):
@@ -1002,29 +1024,49 @@ def draw_board_drop_indicator(surface: pygame.Surface, insert_index: int,
 
 def draw_tavern(surface: pygame.Surface, tavern_cards: list,
                 current_mana: int, mouse_position: tuple,
-                dragged_card=None) -> tuple[list, pygame.Rect, tuple | None]:
+                dragged_card=None, drag_insert_index: int = -1) -> tuple[list, tuple | None]:
     """Draws the tavern shop inside the boss board zone during planning phase.
-    Returns card rects, refresh button rect, and hovered zoom info."""
+    Returns card rects and hovered zoom info."""
     if not tavern_cards:
-        return [], pygame.Rect(0, 0, 0, 0), None
+        return [], None
 
     token_width = 120
     token_height = 140
     token_spacing = 16
-    total_width = len(tavern_cards) * token_width + (len(tavern_cards) - 1) * token_spacing
-    start_x = (SCREEN_WIDTH - total_width) // 2 - 60
     token_y = BOSS_BOARD_Y + (BOARD_ZONE_HEIGHT - token_height) // 2
     card_rects = []
     hovered_zoom_info = None
 
-    for index, card in enumerate(tavern_cards):
-        card_x = start_x + index * (token_width + token_spacing)
+    display_cards = [c for c in tavern_cards if c is not dragged_card]
+    display_length = len(display_cards) + (1 if drag_insert_index >= 0 else 0)
+    total_width = display_length * token_width + (display_length - 1) * token_spacing
+    start_x = (SCREEN_WIDTH - total_width) // 2 - 60
+
+    draw_index = 0
+    card_index = 0
+
+    for position in range(display_length):
+        card_x = start_x + draw_index * (token_width + token_spacing)
+
+        if position == drag_insert_index:
+            slot_rect = pygame.Rect(card_x, token_y, token_width, token_height)
+            pygame.draw.ellipse(surface, (40, 60, 80), slot_rect)
+            pygame.draw.ellipse(surface, (80, 140, 200), slot_rect, width=2)
+            inner_rect = pygame.Rect(card_x + 8, token_y + 8, token_width - 16, token_height - 16)
+            pygame.draw.ellipse(surface, (60, 100, 160), inner_rect, width=1)
+            draw_index += 1
+            continue
+
+        if card_index >= len(display_cards):
+            break
+
+        card = display_cards[card_index]
+        card_x = start_x + draw_index * (token_width + token_spacing)
         can_afford = current_mana >= card.mana_cost
         token_rect = pygame.Rect(card_x, token_y, token_width, token_height)
         is_hovered = token_rect.collidepoint(mouse_position)
 
         if isinstance(card, Unit):
-            # Draw glow FIRST so it appears behind the token
             if can_afford:
                 for glow_size in range(8, 0, -2):
                     glow_alpha = int(60 * (glow_size / 8))
@@ -1035,19 +1077,14 @@ def draw_tavern(surface: pygame.Surface, tavern_cards: list,
                                                     token_height + glow_size * 2))
                     surface.blit(glow_surface, (card_x - glow_size, token_y - glow_size))
 
-            # Draw token ONCE with border override if being dragged
-            is_being_dragged = card is dragged_card
-            token_border = (80, 220, 80) if is_being_dragged else None
-            draw_unit_token(surface, card, card_x, token_y, border_colour_override=token_border)
+            draw_unit_token(surface, card, card_x, token_y)
 
-            # Dim if unaffordable
             if not can_afford:
                 dim_surface = pygame.Surface((token_width, token_height), pygame.SRCALPHA)
                 pygame.draw.ellipse(dim_surface, (0, 0, 0, 100),
                                     pygame.Rect(0, 0, token_width, token_height))
                 surface.blit(dim_surface, (card_x, token_y))
 
-            # Track hover for zoom
             if is_hovered:
                 zoom_x = card_x + (token_width - CARD_ZOOM_WIDTH) // 2
                 zoom_x = max(10, min(zoom_x, SCREEN_WIDTH - CARD_ZOOM_WIDTH - 10))
@@ -1055,58 +1092,107 @@ def draw_tavern(surface: pygame.Surface, tavern_cards: list,
                 hovered_zoom_info = (card, zoom_x, zoom_y)
 
         card_rects.append((card, token_rect))
+        draw_index += 1
+        card_index += 1
 
-    # Refresh button
-    refresh_button_x = start_x + len(tavern_cards) * (token_width + token_spacing) + 10
-    refresh_button_y = BOSS_BOARD_Y + BOARD_ZONE_HEIGHT // 2 - 25
-    refresh_rect = pygame.Rect(refresh_button_x, refresh_button_y, 100, 50)
-    can_afford_refresh = current_mana >= 1
-    is_hovered = refresh_rect.collidepoint(mouse_position)
-    refresh_colour = (70, 130, 200) if (is_hovered and can_afford_refresh) else (
-        50, 100, 160) if can_afford_refresh else (40, 40, 55)
-    pygame.draw.rect(surface, refresh_colour, refresh_rect, border_radius=8)
-    pygame.draw.rect(surface, (100, 150, 220), refresh_rect, width=2, border_radius=8)
+    return card_rects, hovered_zoom_info
+
+
+def draw_refresh_button(surface: pygame.Surface, current_mana: int,
+                        mouse_position: tuple) -> pygame.Rect:
+    """Draws the refresh button next to the player hero portrait."""
+    button_radius = 28
+    button_x = SCREEN_WIDTH // 2 + 80
+    button_y = BOSS_PORTRAIT_Y + 40
+
+    can_afford = current_mana >= 1
+    is_hovered = (pygame.Vector2(mouse_position).distance_to((button_x, button_y)) < button_radius)
+
+    if can_afford:
+        for glow_size in range(6, 0, -2):
+            glow_alpha = int(80 * (glow_size / 6))
+            glow_surface = pygame.Surface(
+                ((button_radius + glow_size) * 2, (button_radius + glow_size) * 2), pygame.SRCALPHA)
+            pygame.draw.circle(glow_surface, (80, 140, 255, glow_alpha),
+                               (button_radius + glow_size, button_radius + glow_size),
+                               button_radius + glow_size)
+            surface.blit(glow_surface, (button_x - button_radius - glow_size,
+                                        button_y - button_radius - glow_size))
+
+    fill_colour = (60, 120, 200) if (can_afford and is_hovered) else (
+        40, 90, 160) if can_afford else (40, 40, 55)
+    pygame.draw.circle(surface, fill_colour, (button_x, button_y), button_radius)
+    pygame.draw.circle(surface, (100, 160, 255) if can_afford else (60, 60, 80),
+                       (button_x, button_y), button_radius, width=2)
+
+    arrow_colour = (200, 220, 255) if can_afford else (80, 80, 100)
+    arrow_rect = pygame.Rect(button_x - 10, button_y - 10, 20, 20)
+    pygame.draw.arc(surface, arrow_colour, arrow_rect, 0.3, 5.8, width=3)
+    pygame.draw.polygon(surface, arrow_colour, [
+        (button_x + 10, button_y - 4),
+        (button_x + 10, button_y + 6),
+        (button_x + 15, button_y + 1),
+    ])
+
+    cost_circle_x = button_x + button_radius - 4
+    cost_circle_y = button_y - button_radius + 4
+    pygame.draw.circle(surface, (30, 80, 200), (cost_circle_x, cost_circle_y), 12)
+    pygame.draw.circle(surface, (100, 150, 255), (cost_circle_x, cost_circle_y), 12, width=2)
     font = pygame.font.SysFont(None, 22)
-    surface.blit(font.render("Refresh", True, COLOUR_TEXT_DEFAULT),
-                 (refresh_button_x + (100 - font.size("Refresh")[0]) // 2, refresh_button_y + 8))
-    surface.blit(font.render("(1 mana)", True, (160, 180, 220)),
-                 (refresh_button_x + (100 - font.size("(1 mana)")[0]) // 2, refresh_button_y + 26))
+    cost_surface = font.render("1", True, COLOUR_TEXT_DEFAULT)
+    surface.blit(cost_surface, (cost_circle_x - cost_surface.get_width() // 2,
+                                cost_circle_y - cost_surface.get_height() // 2))
 
-    return card_rects, refresh_rect, hovered_zoom_info
+    return pygame.Rect(button_x - button_radius, button_y - button_radius,
+                       button_radius * 2, button_radius * 2)
 
 
 def draw_hand(surface: pygame.Surface, hand: Hand, selected_card: Unit,
               current_mana: int, mouse_position: tuple = (0, 0)) -> tuple[list, tuple | None]:
-    """Draws all cards in the hand above the tavern. Returns card rects and hovered zoom info."""
-    total_hand_width = len(hand.cards) * CARD_WIDTH + (len(hand.cards) - 1) * CARD_SPACING
-    start_x = (SCREEN_WIDTH - total_hand_width) // 2
+    """Draws all cards in the hand below the hero portrait with dynamic spacing."""
+    if not hand.cards:
+        return [], None
+
     card_rects = []
     hovered_zoom_info = None
+    is_affordable = True
 
-    hand_y = PLAYER_BOARD_Y - CARD_HEIGHT - 20
+    # Dynamic spacing — cards compress as hand grows
+    max_total_width = SCREEN_WIDTH - 400
+    natural_width = len(hand.cards) * CARD_WIDTH + (len(hand.cards) - 1) * CARD_SPACING
+    total_width = min(natural_width, max_total_width)
+    if len(hand.cards) > 1:
+        card_step = (total_width - CARD_WIDTH) // (len(hand.cards) - 1)
+    else:
+        card_step = 0
+
+    start_x = (SCREEN_WIDTH - total_width) // 2
+    hand_y = SCREEN_HEIGHT - CARD_HEIGHT - 10
 
     for index, card in enumerate(hand.cards):
-        card_x = start_x + index * (CARD_WIDTH + CARD_SPACING)
+        card_x = start_x + index * card_step
 
-        peek_rect = pygame.Rect(card_x, hand_y, CARD_WIDTH, CARD_HEIGHT)
-        is_hovered = peek_rect.collidepoint(mouse_position)
+        card_rect = pygame.Rect(card_x, hand_y, CARD_WIDTH, CARD_HEIGHT)
+        is_hovered = card_rect.collidepoint(mouse_position)
         is_selected = card is selected_card
 
-        is_affordable = current_mana >= card.mana_cost
+        # Raise card slightly on hover
+        draw_y = hand_y - 15 if (is_hovered or is_selected) else hand_y
+
         if isinstance(card, Unit):
-            draw_unit_card(surface, card, card_x, hand_y,
+            draw_unit_card(surface, card, card_x, draw_y,
                            is_selected=is_selected, is_affordable=is_affordable)
             if is_hovered and not is_selected:
                 dim_surface = pygame.Surface((CARD_WIDTH, CARD_HEIGHT), pygame.SRCALPHA)
                 dim_surface.fill((0, 0, 0, 160))
-                surface.blit(dim_surface, (card_x, hand_y))
+                surface.blit(dim_surface, (card_x, draw_y))
 
-        card_rects.append((card, pygame.Rect(card_x, hand_y, CARD_WIDTH, CARD_HEIGHT)))
+        card_rects.append((card, pygame.Rect(card_x, draw_y, CARD_WIDTH, CARD_HEIGHT)))
 
         if is_hovered and not is_selected and isinstance(card, Unit):
             zoom_x = card_x + (CARD_WIDTH - CARD_ZOOM_WIDTH) // 2
             zoom_x = max(10, min(zoom_x, SCREEN_WIDTH - CARD_ZOOM_WIDTH - 10))
-            zoom_y = hand_y - CARD_ZOOM_HEIGHT + CARD_HEIGHT - 20
+            zoom_y = hand_y - CARD_ZOOM_HEIGHT - 10
             hovered_zoom_info = (card, zoom_x, zoom_y)
 
     return card_rects, hovered_zoom_info
@@ -1227,6 +1313,7 @@ def main():
                             is_in_combat = True
 
 
+
                     elif not is_in_combat:
                         # Check for click on tavern card to begin drag-to-buy
                         clicked_tavern_card = None
@@ -1321,11 +1408,29 @@ def main():
                             insert_index = min(insert_index, len(game_state.player_board))
                             game_state.player_board.insert(insert_index, drag_state.dragged_card)
 
+
                     elif drag_state.drag_source == "tavern":
-                        hand_zone = pygame.Rect(0, PLAYER_BOARD_Y - CARD_HEIGHT - 20,
-                                                SCREEN_WIDTH, CARD_HEIGHT + 20)
+                        hand_zone = pygame.Rect(0, SCREEN_HEIGHT - CARD_HEIGHT - 30, SCREEN_WIDTH, CARD_HEIGHT + 30)
+                        tavern_zone = pygame.Rect(220, BOSS_BOARD_Y, SCREEN_WIDTH - 440, BOARD_ZONE_HEIGHT)
                         if hand_zone.collidepoint(mouse_position) and not game_state.player_hand.is_full():
-                            game_state.buy_card(drag_state.dragged_card)
+                            result = game_state.buy_card(drag_state.dragged_card)
+                            print(f"buy_card result: {result}, hand size: {len(game_state.player_hand.cards)}")
+                        elif tavern_zone.collidepoint(mouse_position):
+                            token_width = 120
+                            token_spacing = 16
+                            display_length = len(game_state.tavern_cards) - 1
+                            total_width = display_length * token_width + (display_length - 1) * token_spacing
+                            start_x = (SCREEN_WIDTH - total_width) // 2 - 60
+                            insert_index = 0
+                            for i in range(display_length):
+                                slot_centre_x = start_x + i * (token_width + token_spacing) + token_width // 2
+                                if mouse_position[0] > slot_centre_x:
+                                    insert_index = i + 1
+                            game_state.tavern_cards.remove(drag_state.dragged_card)
+                            insert_index = min(insert_index, len(game_state.tavern_cards))
+                            game_state.tavern_cards.insert(insert_index, drag_state.dragged_card)
+
+                    # These must be OUTSIDE all source checks, at the same level as if/elif
 
                     drag_state.is_dragging = False
                     drag_state.dragged_card = None
@@ -1466,29 +1571,54 @@ def main():
         elif current_scene == "game" and game_state is not None:
             is_planning = not is_in_combat
             draw_game_board_background(screen, is_planning=is_planning)
-            draw_boss_hand(screen, game_state.boss_hand_size)
 
             if is_planning:
-                tavern_card_rects, refresh_button_rect, tavern_hovered_zoom = draw_tavern(
+                tavern_drag_index = -1
+                if drag_state.is_dragging and drag_state.drag_source == "tavern":
+                    tavern_zone = pygame.Rect(220, BOSS_BOARD_Y, SCREEN_WIDTH - 440, BOARD_ZONE_HEIGHT)
+                    if tavern_zone.collidepoint(mouse_position):
+                        token_width = 120
+                        token_spacing = 16
+                        display_length = len(game_state.tavern_cards) - 1
+                        total_width = display_length * token_width + (display_length - 1) * token_spacing
+                        start_x = (SCREEN_WIDTH - total_width) // 2 - 60
+                        tavern_drag_index = 0
+                        for i in range(display_length):
+                            slot_centre_x = start_x + i * (token_width + token_spacing) + token_width // 2
+                            if mouse_position[0] > slot_centre_x:
+                                tavern_drag_index = i + 1
+                tavern_card_rects, tavern_hovered_zoom = draw_tavern(
                     screen, game_state.tavern_cards,
                     game_state.current_mana, mouse_position,
-                    dragged_card=drag_state.dragged_card if drag_state.drag_source == "tavern" else None)
+                    dragged_card=drag_state.dragged_card if drag_state.drag_source == "tavern" else None,
+                    drag_insert_index=tavern_drag_index)
+                refresh_button_rect = draw_refresh_button(
+                    screen, game_state.current_mana, mouse_position)
+                draw_hero_portrait(
+                    screen, name="Shopkeeper", health=None,
+                    centre_x=SCREEN_WIDTH // 2, top_y=BOSS_PORTRAIT_Y, is_player=False,
+                    is_shopkeeper=True)
             else:
                 tavern_card_rects = []
                 tavern_hovered_zoom = None
                 draw_boss_board(screen, game_state.boss_board, boss_animation_states)
+                draw_hero_portrait(
+                    screen, name="The Swamp King", health=game_state.boss_health,
+                    centre_x=SCREEN_WIDTH // 2, top_y=BOSS_PORTRAIT_Y, is_player=False)
 
             # Player board with drag support
             drag_insert_index = -1
             dragged_card_display = None
             if drag_state.is_dragging and not is_in_combat:
-                board_zone = get_player_board_zone_rect()
-                if board_zone.collidepoint(mouse_position):
-                    source_board_length = len(game_state.player_board)
-                    if drag_state.drag_source == "board":
-                        source_board_length -= 1
-                    drag_insert_index = get_board_insert_index(mouse_position[0], source_board_length)
-                dragged_card_display = drag_state.dragged_card
+                if drag_state.drag_source in ("hand", "board"):
+                    board_zone = get_player_board_zone_rect()
+                    if board_zone.collidepoint(mouse_position):
+                        source_board_length = len(game_state.player_board)
+                        if drag_state.drag_source == "board":
+                            source_board_length -= 1
+                        drag_insert_index = get_board_insert_index(mouse_position[0], source_board_length)
+                if drag_state.drag_source == "board":
+                    dragged_card_display = drag_state.dragged_card
 
             draw_player_board(screen, game_state.player_board, player_animation_states,
                               drag_insert_index=drag_insert_index,
@@ -1498,14 +1628,10 @@ def main():
                 draw_token_damage_popup(screen, popup, current_time)
 
             draw_hero_portrait(
-                screen, name="The Swamp King", health=game_state.boss_health,
-                centre_x=SCREEN_WIDTH // 2, top_y=BOSS_PORTRAIT_Y, is_player=False)
-            draw_hero_portrait(
                 screen, name="Hero", health=game_state.player_health,
                 centre_x=SCREEN_WIDTH // 2, top_y=PLAYER_PORTRAIT_Y, is_player=True)
 
             draw_player_mana_bar(screen, game_state.current_mana, game_state.maximum_mana)
-            draw_boss_mana_bar(screen, game_state.boss_current_mana, game_state.boss_maximum_mana)
             end_turn_button_rect = draw_end_turn_button(
                 screen, game_state.is_player_turn() and not is_in_combat, mouse_position)
             menu_button_rect = draw_menu_button(screen, mouse_position)
@@ -1516,7 +1642,16 @@ def main():
                 drag_draw_x = drag_state.drag_x - CARD_WIDTH // 2
                 drag_draw_y = drag_state.drag_y - CARD_HEIGHT // 2
                 if isinstance(drag_state.dragged_card, Unit):
-                    draw_unit_card(screen, drag_state.dragged_card, drag_draw_x, drag_draw_y)
+                    if drag_state.drag_source == "tavern":
+                        hand_zone = pygame.Rect(0, SCREEN_HEIGHT // 2, SCREEN_WIDTH, SCREEN_HEIGHT // 2)
+                        if hand_zone.collidepoint(mouse_position):
+                            border_override = (80, 220, 80)  # Green — will purchase on release
+                        else:
+                            border_override = (80, 160, 255)  # Blue — still hovering tavern
+                    else:
+                        border_override = None
+                    draw_unit_card(screen, drag_state.dragged_card, drag_draw_x, drag_draw_y,
+                                   border_colour_override=border_override)
 
             # Draw hand above tavern
             hand_card_rects, hovered_zoom_info = draw_hand(
