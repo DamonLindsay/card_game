@@ -11,23 +11,35 @@ class Deck:
         random.shuffle(self.cards)
 
     def draw(self) -> Card | None:
-        """Removes and returns the top card of the deck.
-        Returns None if the deck is empty."""
+        """Removes and returns a random card from the pool.
+        Returns None if the pool is empty."""
         if self.is_empty():
             return None
-        return self.cards.pop()
+        index = random.randint(0, len(self.cards) - 1)
+        return self.cards.pop(index)
+
+    def draw_multiple(self, count: int, exclude: list = None) -> list[Card]:
+        """Draws multiple random cards from the pool, excluding specified cards.
+        Returns as many as available up to count."""
+        exclude = exclude or []
+        available = [card for card in self.cards if card not in exclude]
+        draw_count = min(count, len(available))
+        drawn = random.sample(available, draw_count)
+        for card in drawn:
+            self.cards.remove(card)
+        return drawn
 
     def add_card(self, card: Card):
-        """Adds a single card to the bottom of the deck."""
-        self.cards.insert(0, card)
+        """Adds a single card to the pool."""
+        self.cards.append(card)
 
     def is_empty(self) -> bool:
-        """Returns True if there are no cards remaining in the deck."""
+        """Returns True if there are no cards remaining in the pool."""
         return len(self.cards) == 0
 
     def __len__(self) -> int:
-        """Returns the number of cards remaining in the deck."""
+        """Returns the number of cards remaining in the pool."""
         return len(self.cards)
 
     def __str__(self) -> str:
-        return f"Deck({len(self.cards)} cards."
+        return f"Deck({len(self.cards)} cards)"
